@@ -220,7 +220,7 @@ impl<C: Coefficient> Path for Tracked<C> {
     fn cos_branch(self, cos: f64) -> Self {
         Self {
             coeff: self.coeff.scale(cos),
-            freq: self.freq,
+            freq: self.freq + 1,
             sins: self.sins,
         }
     }
@@ -230,7 +230,7 @@ impl<C: Coefficient> Path for Tracked<C> {
         Self {
             coeff: self.coeff.scale(sin).scale(sign),
             freq: self.freq + 1,
-            sins: self.sins + 1,
+            sins: self.sins,
         }
     }
 
