@@ -395,6 +395,62 @@ fn a_clifford_gate_drops_terms_only_by_rules_on_the_pauli_string() {
 }
 
 #[test]
+fn a_clifford_gate_does_not_apply_the_relative_threshold() {
+    let start = || {
+        let mut sum = PauliSum::<1>::new(3).unwrap();
+        sum.add(&[(0, PauliOp::Z)], 1.0).unwrap();
+        sum.add(&[(1, PauliOp::Z)], 0.1).unwrap();
+        sum
+    };
+    // The weight cap makes the gate truncate, and the relative threshold would drop a term.
+    let truncation = Truncation {
+        max_weight: Some(3),
+        min_rel_coeff: Some(0.5),
+        ..Truncation::none()
+    };
+
+    for gate in [Gate::H(1), Gate::Cx(0, 1), Gate::X(1), Gate::Swap(1, 2)] {
+        let mut sum = start();
+        propagate(std::slice::from_ref(&gate), &mut sum, &truncation).unwrap();
+        assert_eq!(sum.len(), 2, "{gate:?}");
+    }
+
+    // The next gate of another kind applies it.
+    let mut sum = start();
+    propagate(&[Gate::rz(0.3, 2), Gate::H(1)], &mut sum, &truncation).unwrap();
+    assert_eq!(sum.len(), 1);
+    assert_eq!(sum.coeff(&PauliString::from_ops(&[(0, PauliOp::Z)])), 1.0);
+}
+
+#[test]
+fn a_clifford_gate_drops_the_terms_whose_damped_coefficient_it_lowers() {
+    // 0.05 * 10^-weight is above the threshold at weight one and below it at weight two.
+    let truncation = Truncation {
+        weight_damping: Some(WeightDamping {
+            gamma: 1.0,
+            min_abs_coeff: 1e-3,
+        }),
+        ..Truncation::none()
+    };
+    let x_on_control = PauliString::<1>::from_ops(&[(0, PauliOp::X)]);
+    let z_on_control = PauliString::<1>::from_ops(&[(0, PauliOp::Z)]);
+    let mut sum = PauliSum::<1>::new(2).unwrap();
+    sum.add_string(x_on_control, 0.05);
+    sum.add_string(z_on_control, 0.05);
+
+    // X on the control becomes XX, Z on the control stays.
+    propagate(&[Gate::Cx(0, 1)], &mut sum, &truncation).unwrap();
+    assert_eq!(sum.sorted_terms(), vec![(z_on_control, 0.05)]);
+
+    // Without the rule both stay.
+    let mut sum = PauliSum::<1>::new(2).unwrap();
+    sum.add_string(x_on_control, 0.05);
+    sum.add_string(z_on_control, 0.05);
+    propagate(&[Gate::Cx(0, 1)], &mut sum, &Truncation::none()).unwrap();
+    assert_eq!(sum.len(), 2);
+}
+
+#[test]
 fn no_sine_branches_leave_the_cosine_path() {
     // With max_sins = 0 the only term left is the start, with one cosine per rotation
     // that does not commute with it.

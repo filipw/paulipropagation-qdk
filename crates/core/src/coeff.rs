@@ -230,7 +230,7 @@ impl<C: Coefficient> Path for Tracked<C> {
         Self {
             coeff: self.coeff.scale(sin).scale(sign),
             freq: self.freq + 1,
-            sins: self.sins,
+            sins: self.sins + 1,
         }
     }
 

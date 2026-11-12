@@ -201,6 +201,26 @@ let nq = 12
     writecase("weight_damping_12", nq, circuit, params, [([:Z], [6], 1.0)]; weight_damping=(0.4, 1e-4), min_abs_coeff=1e-10)
 end
 
+# A rule that reads the Pauli string makes Clifford gates truncate as well. Here that is the
+# damped coefficient, in a circuit where Clifford gates change the weight between rotations.
+let nq = 10, rng = MersenneTwister(9)
+    circuit, params = randomcircuit(rng, nq, 140; one_qubit=[:H, :X, :Y, :Z, :S, :SX], two_qubit=[:CNOT, :CZ, :SWAP])
+    params .*= 0.3
+    observable = [([:Z], [5], 1.0), ([:X, :X], [2, 8], 0.5)]
+    writecase("weight_damping_clifford_10", nq, circuit, params, observable; weight_damping=(0.3, 1e-4), min_abs_coeff=1e-10)
+end
+
+# A Clifford gate that truncates still does not apply the relative threshold: in a circuit of
+# Clifford gates alone the small coefficients stay, and only the weight cap drops terms.
+let nq = 10, rng = MersenneTwister(10)
+    one_qubit, two_qubit = [:H, :X, :Y, :Z, :S, :SX], [:CNOT, :CZ, :SWAP]
+    circuit = Gate[rand(rng) < 0.4 ? CliffordGate(rand(rng, one_qubit), [rand(rng, 1:nq)]) :
+                   CliffordGate(rand(rng, two_qubit), shuffle(rng, 1:nq)[1:2]) for _ in 1:30]
+    observable = unique(term -> term[1:2], [(rand(rng, [:X, :Y, :Z], 3), sort(shuffle(rng, 1:nq)[1:3]), 10.0^(-3 * rand(rng))) for _ in 1:150])
+    writecase("relative_and_weight_truncation_clifford_10", nq, circuit, Float64[], observable;
+        min_rel_coeff=0.1, max_weight=7, min_abs_coeff=1e-10)
+end
+
 # Complex coefficients, exactly and with a threshold on their absolute value.
 let nq = 7, rng = MersenneTwister(6)
     circuit, params = randomnoisycircuit(rng, nq, 70)
