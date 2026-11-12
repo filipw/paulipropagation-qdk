@@ -1,9 +1,12 @@
-//! Gates and their action on Pauli strings in the Heisenberg picture.
+//! Gates and noise channels, and their action on Pauli strings in the Heisenberg picture.
 
 use crate::{Error, PauliOp, PauliString};
 use std::f64::consts::FRAC_PI_4;
 
-/// A gate, written as it acts on states (Schrödinger picture).
+/// The most qubits a Pauli channel can act on; its table has `4^n` entries.
+const MAX_CHANNEL_QUBITS: usize = 6;
+
+/// A gate or noise channel, written as it acts on states (Schrödinger picture).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Gate {
     H(usize),
@@ -26,6 +29,36 @@ pub enum Gate {
         generator: Vec<(usize, PauliOp)>,
         theta: f64,
     },
+    /// A channel that is diagonal in the Pauli basis, such as a random Pauli error.
+    ///
+    /// A Pauli string is multiplied by `factors[index]`, where `index` is the number whose
+    /// `i`-th base-4 digit is the operator on `qubits[i]`, with `I, X, Y, Z = 0, 1, 2, 3`.
+    PauliChannel {
+        qubits: Vec<usize>,
+        factors: Vec<f64>,
+    },
+    /// Amplitude damping, which takes the state 1 to the state 0 with probability `gamma`.
+    AmplitudeDamping {
+        qubit: usize,
+        gamma: f64,
+    },
+}
+
+fn digit(op: PauliOp) -> usize {
+    match op {
+        PauliOp::I => 0,
+        PauliOp::X => 1,
+        PauliOp::Y => 2,
+        PauliOp::Z => 3,
+    }
+}
+
+fn check_strength(value: f64, what: &'static str) -> Result<(), Error> {
+    if (0.0..=1.0).contains(&value) {
+        Ok(())
+    } else {
+        Err(Error::InvalidNoise(what))
+    }
 }
 
 impl Gate {
@@ -82,6 +115,117 @@ impl Gate {
     #[must_use]
     pub fn tdg(q: usize) -> Self {
         Self::rz(-FRAC_PI_4, q)
+    }
+
+    /// The channel that applies the Pauli string `errors[k].0` with probability `errors[k].1`
+    /// and nothing otherwise. Operator `i` of an error string acts on `qubits[i]`.
+    ///
+    /// In the Heisenberg picture a Pauli string `P` keeps the factor `1 - 2 p`, where `p` is
+    /// the total probability of the errors that anticommute with `P`.
+    pub fn pauli_channel(qubits: &[usize], errors: &[(Vec<PauliOp>, f64)]) -> Result<Self, Error> {
+        let n = qubits.len();
+        if n == 0 || n > MAX_CHANNEL_QUBITS {
+            return Err(Error::InvalidNoise(
+                "a Pauli channel acts on between one and six qubits",
+            ));
+        }
+        let mut total = 0.0;
+        for (ops, probability) in errors {
+            if ops.len() != n {
+                return Err(Error::InvalidNoise(
+                    "an error string has to give one operator per qubit of the channel",
+                ));
+            }
+            check_strength(*probability, "an error probability is not between 0 and 1")?;
+            total += probability;
+        }
+        if total > 1.0 + 1e-9 {
+            return Err(Error::InvalidNoise(
+                "the error probabilities sum to more than 1",
+            ));
+        }
+
+        let factors = (0..1usize << (2 * n))
+            .map(|index| {
+                let anticommuting: f64 = errors
+                    .iter()
+                    .filter(|(ops, _)| {
+                        // Two strings anticommute if they differ, both without an identity,
+                        // on an odd number of qubits.
+                        let clashes = ops
+                            .iter()
+                            .enumerate()
+                            .filter(|&(i, &op)| {
+                                let other = (index >> (2 * i)) & 3;
+                                op != PauliOp::I && other != 0 && other != digit(op)
+                            })
+                            .count();
+                        clashes % 2 == 1
+                    })
+                    .map(|&(_, probability)| probability)
+                    .sum();
+                1.0 - 2.0 * anticommuting
+            })
+            .collect();
+        Ok(Gate::PauliChannel {
+            qubits: qubits.to_vec(),
+            factors,
+        })
+    }
+
+    /// Depolarizing noise, which multiplies X, Y and Z on the qubit by `1 - strength`.
+    ///
+    /// This is a random X, Y or Z error with probability `strength / 4` each.
+    pub fn depolarizing(strength: f64, q: usize) -> Result<Self, Error> {
+        Self::pauli_damping(strength, q, [true, true, true])
+    }
+
+    /// Pauli X noise, which multiplies Y and Z on the qubit by `1 - strength`.
+    ///
+    /// This is a random X error with probability `strength / 2`.
+    pub fn pauli_x_noise(strength: f64, q: usize) -> Result<Self, Error> {
+        Self::pauli_damping(strength, q, [false, true, true])
+    }
+
+    /// Pauli Y noise, which multiplies X and Z on the qubit by `1 - strength`.
+    ///
+    /// This is a random Y error with probability `strength / 2`.
+    pub fn pauli_y_noise(strength: f64, q: usize) -> Result<Self, Error> {
+        Self::pauli_damping(strength, q, [true, false, true])
+    }
+
+    /// Pauli Z noise, or dephasing, which multiplies X and Y on the qubit by `1 - strength`.
+    ///
+    /// This is a random Z error with probability `strength / 2`.
+    pub fn pauli_z_noise(strength: f64, q: usize) -> Result<Self, Error> {
+        Self::pauli_damping(strength, q, [true, true, false])
+    }
+
+    fn pauli_damping(strength: f64, q: usize, damped: [bool; 3]) -> Result<Self, Error> {
+        check_strength(strength, "a noise strength is not between 0 and 1")?;
+        let factor = |is_damped: bool| if is_damped { 1.0 - strength } else { 1.0 };
+        Ok(Gate::PauliChannel {
+            qubits: vec![q],
+            factors: vec![1.0, factor(damped[0]), factor(damped[1]), factor(damped[2])],
+        })
+    }
+
+    /// Amplitude damping with decay probability `gamma`.
+    ///
+    /// In the Heisenberg picture X and Y on the qubit are multiplied by `sqrt(1 - gamma)`,
+    /// and Z becomes `(1 - gamma) Z + gamma I`.
+    pub fn amplitude_damping(gamma: f64, q: usize) -> Result<Self, Error> {
+        check_strength(gamma, "a damping probability is not between 0 and 1")?;
+        Ok(Gate::AmplitudeDamping { qubit: q, gamma })
+    }
+
+    /// Whether the gate is a noise channel rather than a unitary.
+    #[must_use]
+    pub fn is_noise(&self) -> bool {
+        matches!(
+            self,
+            Gate::PauliChannel { .. } | Gate::AmplitudeDamping { .. }
+        )
     }
 
     /// The Toffoli gate as Clifford and T gates, in the order they act on a state.
@@ -147,13 +291,48 @@ impl Gate {
                 }
                 Ok(())
             }
+            Gate::PauliChannel { qubits, factors } => {
+                for (i, &q) in qubits.iter().enumerate() {
+                    check(q)?;
+                    if qubits[..i].contains(&q) {
+                        return Err(Error::DuplicateQubit { qubit: q });
+                    }
+                }
+                if qubits.is_empty()
+                    || qubits.len() > MAX_CHANNEL_QUBITS
+                    || factors.len() != 1 << (2 * qubits.len())
+                {
+                    return Err(Error::InvalidNoise(
+                        "a Pauli channel needs one factor per Pauli string on its qubits",
+                    ));
+                }
+                if factors.iter().any(|f| !(-1.0..=1.0).contains(f)) {
+                    return Err(Error::InvalidNoise(
+                        "a factor of a Pauli channel is not between -1 and 1",
+                    ));
+                }
+                Ok(())
+            }
+            Gate::AmplitudeDamping { qubit, gamma } => {
+                check(*qubit)?;
+                check_strength(*gamma, "a damping probability is not between 0 and 1")
+            }
         }
+    }
+
+    /// The index into the factors of a Pauli channel on `qubits` for the string `p`.
+    #[inline]
+    pub(crate) fn channel_index<const W: usize>(qubits: &[usize], p: &PauliString<W>) -> usize {
+        qubits
+            .iter()
+            .enumerate()
+            .fold(0, |index, (i, &q)| index | (digit(p.get(q)) << (2 * i)))
     }
 
     /// Replaces `p` by `± U† p U` for a Clifford gate `U` and returns whether the sign is minus.
     ///
     /// # Panics
-    /// If the gate is a rotation, which maps one Pauli string to two.
+    /// If the gate is not a Clifford gate.
     #[inline]
     pub(crate) fn conjugate_clifford<const W: usize>(&self, p: &mut PauliString<W>) -> bool {
         match *self {
@@ -233,7 +412,9 @@ impl Gate {
                 p.set(b, pa);
                 false
             }
-            Gate::Rotation { .. } => unreachable!("a rotation is not a Clifford gate"),
+            Gate::Rotation { .. } | Gate::PauliChannel { .. } | Gate::AmplitudeDamping { .. } => {
+                unreachable!("not a Clifford gate")
+            }
         }
     }
 }

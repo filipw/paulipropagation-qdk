@@ -29,6 +29,15 @@ SAME_GATE = {
     "SWAP": "swap",
 }
 
+# Noise channels of PauliPropagation.jl, which take a strength and a qubit.
+NOISE = {
+    "DepolarizingNoise": "depolarizing",
+    "PauliXNoise": "pauli_x_noise",
+    "PauliYNoise": "pauli_y_noise",
+    "PauliZNoise": "pauli_z_noise",
+    "AmplitudeDampingNoise": "amplitude_damping",
+}
+
 # Coefficients agree to rounding. The slack is for the two reference gates that are
 # rotations here: a rotation by pi/2 leaves cos(pi/2) = 6e-17 where a Clifford gate leaves 0.
 COEFF_TOL = 1e-13
@@ -40,6 +49,8 @@ def build_circuit(case) -> pp.Circuit:
         kind, qubits = gate["gate"], gate["qubits"]
         if kind == "rotation":
             circuit.rotation(gate["paulis"], qubits, gate["theta"])
+        elif kind in NOISE:
+            getattr(circuit, NOISE[kind])(gate["strength"], qubits[0])
         elif kind == "SY":
             # The square root of Y is exp(-i pi/4 Y) up to a phase.
             circuit.ry(math.pi / 2, qubits[0])

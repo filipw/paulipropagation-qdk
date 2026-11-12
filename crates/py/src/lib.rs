@@ -116,6 +116,51 @@ impl PauliSum {
         dispatch!(&self.inner, s => s.overlap_with_zero())
     }
 
+    /// The expectation value in the state where every qubit is in the plus state.
+    fn overlap_with_plus(&self) -> f64 {
+        dispatch!(&self.inner, s => s.overlap_with_plus())
+    }
+
+    /// The expectation value in the computational basis state whose qubits in `ones` are 1
+    /// and whose other qubits are 0.
+    fn overlap_with_computational(&self, ones: Vec<usize>) -> PyResult<f64> {
+        dispatch!(&self.inner, s => s.overlap_with_computational(&ones)).map_err(value_error)
+    }
+
+    /// The expectation value in the maximally mixed state: the coefficient of the identity.
+    fn overlap_with_max_mixed(&self) -> f64 {
+        dispatch!(&self.inner, s => s.overlap_with_max_mixed())
+    }
+
+    /// The sum over the Pauli strings of the products of their coefficients in the two sums,
+    /// which is `Tr[A B] / 2^n`.
+    fn scalar_product(&self, other: &PauliSum) -> PyResult<f64> {
+        match (&self.inner, &other.inner) {
+            (AnySum::W1(a), AnySum::W1(b)) if a.num_qubits() == b.num_qubits() => {
+                Ok(a.scalar_product(b))
+            }
+            (AnySum::W2(a), AnySum::W2(b)) if a.num_qubits() == b.num_qubits() => {
+                Ok(a.scalar_product(b))
+            }
+            (AnySum::W4(a), AnySum::W4(b)) if a.num_qubits() == b.num_qubits() => {
+                Ok(a.scalar_product(b))
+            }
+            (AnySum::W8(a), AnySum::W8(b)) if a.num_qubits() == b.num_qubits() => {
+                Ok(a.scalar_product(b))
+            }
+            _ => Err(value_error(format!(
+                "the sums are on {} and {} qubits",
+                self.num_qubits(),
+                other.num_qubits()
+            ))),
+        }
+    }
+
+    /// The expectation value `Tr[state O]` in a state given as a Pauli sum.
+    fn overlap_with_pauli_sum(&self, state: &PauliSum) -> PyResult<f64> {
+        Ok(self.scalar_product(state)? * 2f64.powi(self.num_qubits() as i32))
+    }
+
     /// The square root of the sum of the squared coefficients.
     fn norm(&self) -> f64 {
         dispatch!(&self.inner, s => s.norm_sqr()).sqrt()
@@ -169,13 +214,19 @@ impl Circuit {
         self.gates.len()
     }
 
-    /// The number of gates that can split a Pauli string in two.
+    /// The number of rotations, which can split a Pauli string in two.
     #[getter]
     fn num_rotations(&self) -> usize {
         self.gates
             .iter()
             .filter(|g| matches!(g, Gate::Rotation { .. }))
             .count()
+    }
+
+    /// The number of noise channels.
+    #[getter]
+    fn num_noise_channels(&self) -> usize {
+        self.gates.iter().filter(|g| g.is_noise()).count()
     }
 
     fn h(&mut self, q: usize) -> PyResult<()> {
@@ -262,6 +313,45 @@ impl Circuit {
         self.push(Gate::rotation(&ops, theta))
     }
 
+    /// A random Pauli error: the string `errors[k][0]` with probability `errors[k][1]`, and
+    /// nothing otherwise. Character `i` of an error string acts on `qubits[i]`.
+    fn pauli_channel(&mut self, qubits: Vec<usize>, errors: Vec<(String, f64)>) -> PyResult<()> {
+        let errors: Vec<(Vec<PauliOp>, f64)> = errors
+            .iter()
+            .map(|(paulis, probability)| {
+                let ops = parse_ops(paulis, &qubits)?;
+                Ok((ops.into_iter().map(|(_, op)| op).collect(), *probability))
+            })
+            .collect::<PyResult<_>>()?;
+        self.push(Gate::pauli_channel(&qubits, &errors).map_err(value_error)?)
+    }
+    /// Depolarizing noise, which multiplies X, Y and Z on the qubit by `1 - strength`: a
+    /// random X, Y or Z error with probability `strength / 4` each.
+    fn depolarizing(&mut self, strength: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::depolarizing(strength, q).map_err(value_error)?)
+    }
+    /// Dephasing, which multiplies X and Y on the qubit by `1 - strength`: a random Z error
+    /// with probability `strength / 2`.
+    fn dephasing(&mut self, strength: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::pauli_z_noise(strength, q).map_err(value_error)?)
+    }
+    /// A random X error with probability `strength / 2`.
+    fn pauli_x_noise(&mut self, strength: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::pauli_x_noise(strength, q).map_err(value_error)?)
+    }
+    /// A random Y error with probability `strength / 2`.
+    fn pauli_y_noise(&mut self, strength: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::pauli_y_noise(strength, q).map_err(value_error)?)
+    }
+    /// A random Z error with probability `strength / 2`.
+    fn pauli_z_noise(&mut self, strength: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::pauli_z_noise(strength, q).map_err(value_error)?)
+    }
+    /// Amplitude damping, which takes the state 1 to the state 0 with probability `gamma`.
+    fn amplitude_damping(&mut self, gamma: f64, q: usize) -> PyResult<()> {
+        self.push(Gate::amplitude_damping(gamma, q).map_err(value_error)?)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Circuit(num_qubits={}, gates={})",
@@ -271,7 +361,8 @@ impl Circuit {
     }
 }
 
-/// Returns `U† O U` for the unitary `U` of `circuit` and the observable `O`.
+/// Returns `U† O U` for the unitary `U` of `circuit` and the observable `O`. If the circuit
+/// has noise channels, the result gives the expectation values of the noisy circuit.
 ///
 /// After every gate, the terms with more than `max_weight` non-identity operators or with a
 /// coefficient below `min_abs_coeff` in absolute value are dropped.

@@ -153,6 +153,14 @@ impl<const W: usize> PauliString<W> {
         self.x.iter().any(|&w| w != 0)
     }
 
+    /// Whether the string holds a Y or a Z, in which case its expectation value in a state of
+    /// X eigenstates is zero.
+    #[inline]
+    #[must_use]
+    pub fn has_y_or_z(&self) -> bool {
+        self.z.iter().any(|&w| w != 0)
+    }
+
     /// Whether the two strings commute.
     #[inline]
     #[must_use]

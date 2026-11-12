@@ -10,6 +10,7 @@ pub enum Error {
     DuplicateQubit { qubit: usize },
     TooManyQubits { num_qubits: usize, capacity: usize },
     NonFiniteAngle,
+    InvalidNoise(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -27,6 +28,7 @@ impl fmt::Display for Error {
                 "{num_qubits} qubits do not fit a Pauli string of {capacity} qubits"
             ),
             Error::NonFiniteAngle => write!(f, "a rotation angle is not finite"),
+            Error::InvalidNoise(what) => write!(f, "{what}"),
         }
     }
 }
@@ -68,7 +70,9 @@ impl Truncation {
     }
 }
 
-/// Replaces the observable `sum` by `U† sum U`, where `U` is the unitary of `circuit`.
+/// Replaces the observable `sum` by `U† sum U`, where `U` is the unitary of `circuit`. With
+/// noise channels in the circuit, this is the adjoint of the channel that the circuit applies
+/// to states, so expectation values are those of the noisy circuit.
 ///
 /// `circuit` lists the gates in the order they act on a state, so they are applied to the
 /// observable last to first. After every gate the terms that `truncation` selects are dropped,
@@ -95,6 +99,16 @@ pub fn propagate<const W: usize>(
                     &mut sum.terms,
                     &mut created,
                 );
+                sum.terms.retain(|p, c| !truncation.drops(p, *c));
+            }
+            Gate::PauliChannel { qubits, factors } => {
+                for (p, c) in &mut sum.terms {
+                    *c *= factors[Gate::channel_index(qubits, p)];
+                }
+                sum.terms.retain(|p, c| !truncation.drops(p, *c));
+            }
+            Gate::AmplitudeDamping { qubit, gamma } => {
+                apply_amplitude_damping(*qubit, *gamma, &mut sum.terms, &mut created);
                 sum.terms.retain(|p, c| !truncation.drops(p, *c));
             }
             // A Pauli gate only changes signs, which truncation does not see.
@@ -148,6 +162,35 @@ fn apply_rotation<const W: usize>(
             let sign = if k == 3 { 1.0 } else { -1.0 };
             created.push((product, *c * sin * sign));
             *c *= cos;
+        }
+    }
+    for &(p, c) in created.iter() {
+        *terms.entry(p).or_insert(0.0) += c;
+    }
+}
+
+/// Applies the adjoint of amplitude damping on `qubit` to every term.
+///
+/// X and Y on the qubit are multiplied by `sqrt(1 - gamma)`. A string with Z there keeps
+/// `1 - gamma` of its coefficient and adds `gamma` of it to the string with the identity there.
+fn apply_amplitude_damping<const W: usize>(
+    qubit: usize,
+    gamma: f64,
+    terms: &mut FxHashMap<PauliString<W>, f64>,
+    created: &mut Vec<(PauliString<W>, f64)>,
+) {
+    let transverse = (1.0 - gamma).sqrt();
+    created.clear();
+    for (p, c) in terms.iter_mut() {
+        match (p.x_bit(qubit), p.z_bit(qubit)) {
+            (false, false) => {}
+            (false, true) => {
+                let mut without_z = *p;
+                without_z.flip_z(qubit);
+                created.push((without_z, gamma * *c));
+                *c *= 1.0 - gamma;
+            }
+            _ => *c *= transverse,
         }
     }
     for &(p, c) in created.iter() {

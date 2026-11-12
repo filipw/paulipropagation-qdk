@@ -119,6 +119,63 @@ def test_readme_example_of_the_julia_package_from_qsharp():
     assert evolved.overlap_with_zero() == pytest.approx(0.15459672824142454, abs=1e-12, rel=0)
 
 
+def test_openqasm_compiled_by_the_qdk_matches_the_qdk_state_vector():
+    from qdk import openqasm
+
+    qasm = """
+        OPENQASM 3.0;
+        include "stdgates.inc";
+        qubit[4] q;
+        bit[4] c;
+        h q[0];
+        cx q[0], q[1];
+        rx(0.37) q[2];
+        ry(-1.2) q[3];
+        cz q[1], q[2];
+        t q[1];
+        sdg q[2];
+        swap q[0], q[3];
+        ccx q[0], q[1], q[2];
+        rz(0.81) q[2];
+        cy q[3], q[1];
+        sx q[0];
+        crz(0.6) q[2], q[3];
+        c = measure q;
+    """
+    qir = openqasm.compile(qasm, target_profile=qsharp.TargetProfile.Base)
+    circuit = pp.circuit_from_qir(str(qir))
+    assert circuit.num_qubits == 4
+
+    # The same circuit in Q#, for the state vector.
+    source = circuit_source(
+        [
+            "H(qs[0]);",
+            "CNOT(qs[0], qs[1]);",
+            "Rx(0.37, qs[2]);",
+            "Ry(-1.2, qs[3]);",
+            "CZ(qs[1], qs[2]);",
+            "T(qs[1]);",
+            "Adjoint S(qs[2]);",
+            "SWAP(qs[0], qs[3]);",
+            "CCNOT(qs[0], qs[1], qs[2]);",
+            "Rz(0.81, qs[2]);",
+            "CY(qs[3], qs[1]);",
+            "SX(qs[0]);",
+            "Controlled Rz([qs[2]], (0.6, qs[3]));",
+        ]
+    )
+    state = state_vector(source, 4)
+
+    rng = random.Random(0)
+    for _ in range(20):
+        paulis, qubits = random_paulis(rng, 4)
+        observable = pp.PauliSum(4)
+        observable.add(paulis, qubits)
+        assert pp.expectation(circuit, observable, min_abs_coeff=0.0) == pytest.approx(
+            pauli_expectation(state, paulis, qubits), abs=1e-10, rel=0
+        ), (paulis, qubits)
+
+
 def test_qir_bitcode_reads_like_qir_text():
     source = circuit_source(["H(qs[0]);", "Rzz(0.3, qs[0], qs[1]);", "T(qs[1]);"])
     text = compile_to_qir(source, 2)

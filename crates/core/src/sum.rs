@@ -85,15 +85,69 @@ impl<const W: usize> PauliSum<W> {
     /// made of `I` and `Z` only.
     #[must_use]
     pub fn overlap_with_zero(&self) -> f64 {
-        // Summed in a fixed order so the result is reproducible.
-        let mut coeffs: Vec<(PauliString<W>, f64)> = self
-            .terms
-            .iter()
-            .filter(|(p, _)| !p.has_x_or_y())
-            .map(|(&p, &c)| (p, c))
-            .collect();
-        coeffs.sort_unstable_by_key(|term| term.0);
-        coeffs.iter().map(|&(_, c)| c).sum()
+        sum_in_order(
+            self.terms
+                .iter()
+                .filter(|(p, _)| !p.has_x_or_y())
+                .map(|(&p, &c)| (p, c)),
+        )
+    }
+
+    /// The expectation value `<+...+| O |+...+>`: the sum of the coefficients of the strings
+    /// made of `I` and `X` only.
+    #[must_use]
+    pub fn overlap_with_plus(&self) -> f64 {
+        sum_in_order(
+            self.terms
+                .iter()
+                .filter(|(p, _)| !p.has_y_or_z())
+                .map(|(&p, &c)| (p, c)),
+        )
+    }
+
+    /// The expectation value in the computational basis state whose qubits in `ones` are 1
+    /// and whose other qubits are 0.
+    pub fn overlap_with_computational(&self, ones: &[usize]) -> Result<f64, Error> {
+        if let Some(&qubit) = ones.iter().find(|&&q| q >= self.num_qubits) {
+            return Err(Error::QubitOutOfRange {
+                qubit,
+                num_qubits: self.num_qubits,
+            });
+        }
+        // A string of I and Z has the sign of its number of Z on the ones, and that number
+        // is odd exactly if the string anticommutes with X on the ones.
+        let flips: Vec<(usize, PauliOp)> = ones.iter().map(|&q| (q, PauliOp::X)).collect();
+        let flips = PauliString::from_ops(&flips);
+        Ok(sum_in_order(
+            self.terms
+                .iter()
+                .filter(|(p, _)| !p.has_x_or_y())
+                .map(|(&p, &c)| (p, if p.commutes(&flips) { c } else { -c })),
+        ))
+    }
+
+    /// The expectation value in the maximally mixed state, `Tr[O] / 2^n`: the coefficient of
+    /// the identity.
+    #[must_use]
+    pub fn overlap_with_max_mixed(&self) -> f64 {
+        self.coeff(&PauliString::identity())
+    }
+
+    /// The sum over the Pauli strings of the products of their coefficients in the two sums,
+    /// which is `Tr[A B] / 2^n`.
+    #[must_use]
+    pub fn scalar_product(&self, other: &Self) -> f64 {
+        let (small, large) = if self.len() <= other.len() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        sum_in_order(
+            small
+                .terms
+                .iter()
+                .filter_map(|(p, &c)| large.terms.get(p).map(|&d| (*p, c * d))),
+        )
     }
 
     /// The sum of the squared coefficients, which unitary gates preserve when nothing is truncated.
@@ -103,4 +157,12 @@ impl<const W: usize> PauliSum<W> {
         squares.sort_unstable_by(f64::total_cmp);
         squares.iter().sum()
     }
+}
+
+/// Sums the values in the order of their Pauli strings, so that the result does not depend
+/// on the order in which a hash map yields them.
+fn sum_in_order<const W: usize>(terms: impl Iterator<Item = (PauliString<W>, f64)>) -> f64 {
+    let mut terms: Vec<(PauliString<W>, f64)> = terms.collect();
+    terms.sort_unstable_by_key(|term| term.0);
+    terms.iter().map(|&(_, value)| value).sum()
 }

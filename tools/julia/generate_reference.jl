@@ -18,10 +18,13 @@ function gatetojson(gate::PauliRotation, theta)
         "qubits" => gate.qinds .- 1, "theta" => theta)
 end
 gatetojson(gate::CliffordGate) = Dict("gate" => string(gate.symbol), "qubits" => gate.qinds .- 1)
+function gatetojson(gate::ParametrizedNoiseChannel, strength)
+    return Dict("gate" => string(nameof(typeof(gate))), "qubits" => [gate.qind - 1], "strength" => strength)
+end
 
 function circuittojson(circuit, params)
     remaining = Iterators.Stateful(params)
-    return [gate isa PauliRotation ? gatetojson(gate, popfirst!(remaining)) : gatetojson(gate) for gate in circuit]
+    return [gate isa ParametrizedGate ? gatetojson(gate, popfirst!(remaining)) : gatetojson(gate) for gate in circuit]
 end
 
 function termstojson(psum, nq)
@@ -82,6 +85,24 @@ function randomcircuit(rng, nq, ngates)
     return circuit, params
 end
 
+"A random circuit as `randomcircuit` makes, with a random noise channel after about every other gate."
+function randomnoisycircuit(rng, nq, ngates)
+    unitary_circuit, unitary_params = randomcircuit(rng, nq, ngates)
+    remaining = Iterators.Stateful(unitary_params)
+    noise_types = [DepolarizingNoise, PauliXNoise, PauliYNoise, PauliZNoise, AmplitudeDampingNoise]
+    circuit = Gate[]
+    params = Float64[]
+    for gate in unitary_circuit
+        push!(circuit, gate)
+        gate isa ParametrizedGate && push!(params, popfirst!(remaining))
+        if rand(rng) < 0.5
+            push!(circuit, rand(rng, noise_types)(rand(rng, 1:nq)))
+            push!(params, 0.3 * rand(rng))
+        end
+    end
+    return circuit, params
+end
+
 # The example of the PauliPropagation.jl README, which states 0.154596728241.
 let nq = 32
     circuit = tfitrottercircuit(nq, 32; topology=bricklayertopology(nq; periodic=true))
@@ -123,4 +144,29 @@ let nq = 100
     circuit = tfitrottercircuit(nq, 12; topology=bricklayertopology(nq; periodic=true))
     params = fill(0.25, countparameters(circuit))
     writecase("tfi_wide_100", nq, circuit, params, [([:Z], [64], 1.0)]; max_weight=6, min_abs_coeff=1e-5)
+end
+
+# Every kind of noise channel, with nothing truncated.
+let nq = 6, rng = MersenneTwister(3)
+    circuit, params = randomnoisycircuit(rng, nq, 60)
+    observable = [([:Z], [1], 1.0), ([:X, :Y], [3, 6], -0.5), ([:Z, :Z, :Z], [2, 4, 5], 0.25)]
+    writecase("noisy_mixed_gates_exact_6", nq, circuit, params, observable; min_abs_coeff=0.0)
+end
+
+# A Trotter circuit with depolarizing noise and amplitude damping on every qubit after every layer.
+let nq = 24, nlayers = 10
+    topology = bricklayertopology(nq)
+    circuit = Gate[]
+    params = Float64[]
+    for _ in 1:nlayers
+        rzzlayer!(circuit, topology)
+        append!(params, fill(0.3, length(topology)))
+        rxlayer!(circuit, nq)
+        append!(params, fill(0.3, nq))
+        for q in 1:nq
+            push!(circuit, DepolarizingNoise(q), AmplitudeDampingNoise(q))
+            push!(params, 0.02, 0.01)
+        end
+    end
+    writecase("noisy_tfi_24", nq, circuit, params, [([:Z], [12], 1.0)]; max_weight=6, min_abs_coeff=1e-5)
 end
