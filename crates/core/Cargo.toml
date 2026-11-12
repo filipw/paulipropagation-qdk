@@ -1,0 +1,13 @@
+[package]
+name = "pauliprop"
+description = "Pauli propagation: Heisenberg-picture simulation of observables as truncated Pauli sums"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rustc-hash = "2"
+
+[dev-dependencies]
+num-complex = "0.4"
+rand = "0.8"

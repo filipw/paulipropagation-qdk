@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "paulipropagation-qdk"
+version = "0.0.1"
+description = "Pauli propagation for circuits compiled with the Microsoft Quantum Development Kit"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = ["pyqir>=0.12.8,<0.13"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "numpy>=1.24", "qdk>=1.34"]
+
+[tool.maturin]
+manifest-path = "crates/py/Cargo.toml"
+python-source = "python"
+module-name = "paulipropagation_qdk._native"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
