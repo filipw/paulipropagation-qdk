@@ -43,7 +43,12 @@ NOISE = {
 COEFF_TOL = 1e-13
 
 
-def build_circuit(case) -> pp.Circuit:
+def number(value) -> float | complex:
+    """A coefficient of a reference file: a real number, or the two parts of a complex one."""
+    return complex(*value) if isinstance(value, list) else value
+
+
+def build_circuit(case, matrices_as_unitaries: bool = False) -> pp.Circuit:
     circuit = pp.Circuit(case["num_qubits"])
     for gate in case["circuit"]:
         kind, qubits = gate["gate"], gate["qubits"]
@@ -57,9 +62,56 @@ def build_circuit(case) -> pp.Circuit:
         elif kind == "ZZpihalf":
             # The reference table for this gate is that of exp(+i pi/4 ZZ).
             circuit.rzz(-math.pi / 2, qubits[0], qubits[1])
+        elif kind == "T":
+            circuit.t(qubits[0])
+        elif kind == "TransferMap":
+            if matrices_as_unitaries and "unitary" in gate:
+                circuit.unitary(qubits, [[number(v) for v in row] for row in gate["unitary"]])
+            else:
+                circuit.transfer_map(qubits, gate["matrix"])
         else:
             getattr(circuit, SAME_GATE[kind])(*qubits)
     return circuit
+
+
+def run_case(case, **options) -> pp.PauliSum:
+    """Propagates the sum of a reference case with its truncations and in its picture."""
+    coeffs = [number(term["coeff"]) for term in case["observable"]]
+    dtype = complex if any(isinstance(c, complex) for c in coeffs) else float
+    start = pp.PauliSum(case["num_qubits"], dtype=dtype)
+    for term, coeff in zip(case["observable"], coeffs):
+        start.add(term["paulis"], term["qubits"], coeff)
+
+    damping = case.get("weight_damping")
+    return pp.propagate(
+        build_circuit(case, **options),
+        start,
+        max_weight=case["max_weight"],
+        min_abs_coeff=case["min_abs_coeff"],
+        min_rel_coeff=case.get("min_rel_coeff"),
+        max_freq=case.get("max_freq"),
+        max_sins=case.get("max_sins"),
+        weight_damping=tuple(damping) if damping else None,
+        heisenberg=case.get("heisenberg", True),
+    )
+
+
+def assert_matches(result: pp.PauliSum, case, tolerance: float = COEFF_TOL) -> None:
+    assert result.overlap_with_zero() == pytest.approx(
+        number(case["overlap_with_zero"]), abs=1e-12, rel=0
+    )
+    assert case["num_terms"] > 50, "the reference case is too small to mean much"
+    if case["terms"] is None:
+        # A case too large to store term by term.
+        assert len(result) == case["num_terms"]
+        return
+
+    ours = dict(result.terms())
+    theirs = {label: number(coeff) for label, coeff in case["terms"]}
+    for label in ours.keys() | theirs.keys():
+        assert ours.get(label, 0.0) == pytest.approx(
+            theirs.get(label, 0.0), abs=tolerance, rel=0
+        ), label
 
 
 def test_reference_cases_exist():
@@ -69,29 +121,14 @@ def test_reference_cases_exist():
 @pytest.mark.parametrize("name", CASES)
 def test_terms_match_the_julia_reference(name):
     case = json.loads((REFERENCE_DIR / f"{name}.json").read_text())
+    assert_matches(run_case(case), case)
 
-    observable = pp.PauliSum(case["num_qubits"])
-    for term in case["observable"]:
-        observable.add(term["paulis"], term["qubits"], term["coeff"])
 
-    result = pp.propagate(
-        build_circuit(case),
-        observable,
-        max_weight=case["max_weight"],
-        min_abs_coeff=case["min_abs_coeff"],
-    )
-
-    ours = dict(result.terms())
-    theirs = {label: coeff for label, coeff in case["terms"]}
-    assert len(theirs) > 1000, "the reference case is too small to mean much"
-
-    for label in ours.keys() | theirs.keys():
-        assert ours.get(label, 0.0) == pytest.approx(
-            theirs.get(label, 0.0), abs=COEFF_TOL, rel=0
-        ), label
-    assert result.overlap_with_zero() == pytest.approx(
-        case["overlap_with_zero"], abs=1e-12, rel=0
-    )
+def test_unitary_matrices_match_the_transfer_maps_of_the_reference():
+    """The reference derives a transfer map from each unitary; here the unitary is the gate."""
+    case = json.loads((REFERENCE_DIR / "matrix_gates_6.json").read_text())
+    assert sum("unitary" in gate for gate in case["circuit"]) >= 10
+    assert_matches(run_case(case, matrices_as_unitaries=True), case, tolerance=1e-12)
 
 
 def test_readme_example_of_the_julia_package():

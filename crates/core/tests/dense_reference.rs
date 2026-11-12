@@ -234,8 +234,10 @@ fn qubits_across_word_boundaries_behave_like_any_others() {
                 generator: generator.iter().map(|(q, op)| (m(q), *op)).collect(),
                 theta: *theta,
             },
-            Gate::PauliChannel { .. } | Gate::AmplitudeDamping { .. } => {
-                unreachable!("random_gate makes unitary gates only")
+            Gate::PauliChannel { .. }
+            | Gate::AmplitudeDamping { .. }
+            | Gate::TransferMap { .. } => {
+                unreachable!("random_gate makes Clifford gates and rotations only")
             }
         }
     };
@@ -289,7 +291,7 @@ fn truncation_drops_heavy_and_small_terms_after_every_gate() {
     by_weight.add(&[(3, PauliOp::X)], 1.0).unwrap();
     let truncation = Truncation {
         max_weight: Some(2),
-        min_abs_coeff: 0.0,
+        ..Truncation::none()
     };
     propagate(&circuit, &mut by_weight, &truncation).unwrap();
     assert!(by_weight.iter().all(|(p, _)| p.weight() <= 2));
@@ -298,8 +300,8 @@ fn truncation_drops_heavy_and_small_terms_after_every_gate() {
     let mut by_coeff = PauliSum::<1>::new(n).unwrap();
     by_coeff.add(&[(3, PauliOp::X)], 1.0).unwrap();
     let truncation = Truncation {
-        max_weight: None,
         min_abs_coeff: 0.05,
+        ..Truncation::none()
     };
     propagate(&circuit, &mut by_coeff, &truncation).unwrap();
     assert!(by_coeff.iter().all(|(_, c)| c.abs() >= 0.05));

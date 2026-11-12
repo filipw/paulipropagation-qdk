@@ -1,10 +1,20 @@
 //! Gates and noise channels, and their action on Pauli strings in the Heisenberg picture.
 
 use crate::{Error, PauliOp, PauliString};
+use num_complex::Complex64;
 use std::f64::consts::FRAC_PI_4;
 
 /// The most qubits a Pauli channel can act on; its table has `4^n` entries.
 const MAX_CHANNEL_QUBITS: usize = 6;
+
+/// The most qubits a transfer map can act on; its matrix has `16^n` entries.
+const MAX_MAP_QUBITS: usize = 5;
+
+/// Entries of a transfer matrix smaller than this are taken to be zero, as in PauliPropagation.jl.
+const MAP_TOLERANCE: f64 = 1e-15;
+
+/// How far `U† U` of a unitary gate may be from the identity, entry by entry.
+const UNITARY_TOLERANCE: f64 = 1e-10;
 
 /// A gate or noise channel, written as it acts on states (Schrödinger picture).
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +51,15 @@ pub enum Gate {
     AmplitudeDamping {
         qubit: usize,
         gamma: f64,
+    },
+    /// A linear map of the Pauli strings on `qubits`, given by its action on an observable.
+    ///
+    /// The Pauli string with index `j` on the qubits becomes the sum of `factor * P_i` over
+    /// the `(i, factor)` in `columns[j]`. The index of a string is the number whose `i`-th
+    /// base-4 digit is the operator on `qubits[i]`, with `I, X, Y, Z = 0, 1, 2, 3`.
+    TransferMap {
+        qubits: Vec<usize>,
+        columns: Vec<Vec<(usize, f64)>>,
     },
 }
 
@@ -219,7 +238,194 @@ impl Gate {
         Ok(Gate::AmplitudeDamping { qubit: q, gamma })
     }
 
-    /// Whether the gate is a noise channel rather than a unitary.
+    /// The gate with the transfer matrix `matrix` in the Pauli basis, as it acts on an observable.
+    ///
+    /// `matrix` holds `4^n` rows of `4^n` entries for `n` qubits. The Pauli string with index
+    /// `j` on the qubits becomes the sum over `i` of `matrix[i * 4^n + j] * P_i`, where the
+    /// `i`-th base-4 digit of an index is the operator on `qubits[i]`, with
+    /// `I, X, Y, Z = 0, 1, 2, 3`.
+    pub fn transfer_map(qubits: &[usize], matrix: &[f64]) -> Result<Self, Error> {
+        let n = qubits.len();
+        if n == 0 || n > MAX_MAP_QUBITS {
+            return Err(Error::InvalidMatrix(
+                "a transfer map acts on between one and five qubits",
+            ));
+        }
+        let dim = 1usize << (2 * n);
+        if matrix.len() != dim * dim {
+            return Err(Error::InvalidMatrix(
+                "a transfer matrix on n qubits has 4^n rows and 4^n columns",
+            ));
+        }
+        if matrix.iter().any(|value| !value.is_finite()) {
+            return Err(Error::InvalidMatrix(
+                "an entry of the transfer matrix is not finite",
+            ));
+        }
+        let columns = (0..dim)
+            .map(|j| {
+                (0..dim)
+                    .map(|i| (i, matrix[i * dim + j]))
+                    .filter(|&(_, value)| value != 0.0)
+                    .collect()
+            })
+            .collect();
+        Ok(Gate::TransferMap {
+            qubits: qubits.to_vec(),
+            columns,
+        })
+    }
+
+    /// The gate with the unitary `matrix`, as it acts on a state.
+    ///
+    /// `matrix` holds `2^n` rows of `2^n` entries for `n` qubits, and `qubits[0]` is the most
+    /// significant bit of a row or column index, so that the matrix of independent gates on
+    /// the qubits is their Kronecker product in the order of `qubits`.
+    pub fn unitary(qubits: &[usize], matrix: &[Complex64]) -> Result<Self, Error> {
+        let n = qubits.len();
+        if n == 0 || n > MAX_MAP_QUBITS {
+            return Err(Error::InvalidMatrix(
+                "a unitary gate acts on between one and five qubits",
+            ));
+        }
+        let dim = 1usize << n;
+        if matrix.len() != dim * dim {
+            return Err(Error::InvalidMatrix(
+                "a unitary matrix on n qubits has 2^n rows and 2^n columns",
+            ));
+        }
+        for a in 0..dim {
+            for b in 0..dim {
+                let entry: Complex64 = (0..dim)
+                    .map(|r| matrix[r * dim + a].conj() * matrix[r * dim + b])
+                    .sum();
+                let expected = if a == b { 1.0 } else { 0.0 };
+                let distance = (entry - expected).norm();
+                if distance.is_nan() || distance > UNITARY_TOLERANCE {
+                    return Err(Error::InvalidMatrix("the matrix is not unitary"));
+                }
+            }
+        }
+
+        // The Pauli string with index `j`, as the bits it flips, the bits it reads for a
+        // sign, and its number of Y operators. Qubit `i` is bit `n - 1 - i` of a basis state.
+        let masks = |index: usize| {
+            let (mut x, mut z, mut ys) = (0usize, 0usize, 0u32);
+            for i in 0..n {
+                let bit = 1 << (n - 1 - i);
+                match (index >> (2 * i)) & 3 {
+                    1 => x |= bit,
+                    2 => {
+                        x |= bit;
+                        z |= bit;
+                        ys += 1;
+                    }
+                    3 => z |= bit,
+                    _ => {}
+                }
+            }
+            (x, z, ys)
+        };
+        // The entry of the Pauli string in the column `column`, which is in the row `column ^ x`.
+        let entry = |z: usize, ys: u32, column: usize| {
+            let sign = if (column & z).count_ones() & 1 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
+            Complex64::i().powu(ys) * sign
+        };
+
+        let strings = 1usize << (2 * n);
+        let mut columns = vec![Vec::new(); strings];
+        let mut conjugated = vec![Complex64::new(0.0, 0.0); dim * dim];
+        for (j, column) in columns.iter_mut().enumerate() {
+            // conjugated = U† P_j U
+            let (xj, zj, ysj) = masks(j);
+            for a in 0..dim {
+                for c in 0..dim {
+                    conjugated[a * dim + c] = (0..dim)
+                        .map(|r| {
+                            matrix[r * dim + a].conj()
+                                * entry(zj, ysj, r ^ xj)
+                                * matrix[(r ^ xj) * dim + c]
+                        })
+                        .sum();
+                }
+            }
+            // The factor of P_i is Tr[P_i U† P_j U] / 2^n.
+            for i in 0..strings {
+                let (xi, zi, ysi) = masks(i);
+                let trace: Complex64 = (0..dim)
+                    .map(|r| entry(zi, ysi, r ^ xi) * conjugated[(r ^ xi) * dim + r])
+                    .sum();
+                let factor = trace.re / dim as f64;
+                if factor.abs() >= MAP_TOLERANCE {
+                    column.push((i, factor));
+                }
+            }
+        }
+        Ok(Gate::TransferMap {
+            qubits: qubits.to_vec(),
+            columns,
+        })
+    }
+
+    /// The gate that acts on an observable the way this gate acts on a state: the inverse of
+    /// a unitary gate, and the adjoint map of a channel.
+    #[must_use]
+    pub fn adjoint(&self) -> Gate {
+        match self {
+            Gate::S(q) => Gate::Sdg(*q),
+            Gate::Sdg(q) => Gate::S(*q),
+            Gate::Sx(q) => Gate::Sxdg(*q),
+            Gate::Sxdg(q) => Gate::Sx(*q),
+            Gate::Rotation { generator, theta } => Gate::Rotation {
+                generator: generator.clone(),
+                theta: -theta,
+            },
+            // On an observable Z becomes (1 - gamma) Z + gamma I, so on a state the identity
+            // becomes I + gamma Z and Z becomes (1 - gamma) Z.
+            Gate::AmplitudeDamping { qubit, gamma } => {
+                let transverse = (1.0 - gamma).sqrt();
+                Gate::TransferMap {
+                    qubits: vec![*qubit],
+                    columns: vec![
+                        vec![(0, 1.0), (3, *gamma)],
+                        vec![(1, transverse)],
+                        vec![(2, transverse)],
+                        vec![(3, 1.0 - gamma)],
+                    ],
+                }
+            }
+            Gate::TransferMap { qubits, columns } => {
+                let mut transposed = vec![Vec::new(); columns.len()];
+                for (j, column) in columns.iter().enumerate() {
+                    for &(i, factor) in column {
+                        transposed[i].push((j, factor));
+                    }
+                }
+                Gate::TransferMap {
+                    qubits: qubits.clone(),
+                    columns: transposed,
+                }
+            }
+            // The other Clifford gates are their own inverses, and a channel that is diagonal
+            // in the Pauli basis is its own adjoint.
+            Gate::H(_)
+            | Gate::X(_)
+            | Gate::Y(_)
+            | Gate::Z(_)
+            | Gate::Cx(..)
+            | Gate::Cy(..)
+            | Gate::Cz(..)
+            | Gate::Swap(..)
+            | Gate::PauliChannel { .. } => self.clone(),
+        }
+    }
+
+    /// Whether the gate is one of the noise channels rather than a unitary. A transfer map
+    /// counts as neither.
     #[must_use]
     pub fn is_noise(&self) -> bool {
         matches!(
@@ -317,10 +523,49 @@ impl Gate {
                 check(*qubit)?;
                 check_strength(*gamma, "a damping probability is not between 0 and 1")
             }
+            Gate::TransferMap { qubits, columns } => {
+                for (i, &q) in qubits.iter().enumerate() {
+                    check(q)?;
+                    if qubits[..i].contains(&q) {
+                        return Err(Error::DuplicateQubit { qubit: q });
+                    }
+                }
+                let strings = 1usize << (2 * qubits.len().min(MAX_MAP_QUBITS));
+                if qubits.is_empty() || qubits.len() > MAX_MAP_QUBITS || columns.len() != strings {
+                    return Err(Error::InvalidMatrix(
+                        "a transfer map needs one column per Pauli string on its qubits",
+                    ));
+                }
+                if columns
+                    .iter()
+                    .flatten()
+                    .any(|&(i, factor)| i >= strings || !factor.is_finite())
+                {
+                    return Err(Error::InvalidMatrix(
+                        "an entry of a transfer map is out of range or not finite",
+                    ));
+                }
+                Ok(())
+            }
         }
     }
 
-    /// The index into the factors of a Pauli channel on `qubits` for the string `p`.
+    /// Replaces the operators of `p` on `qubits` by those of the Pauli string with `index`.
+    #[inline]
+    pub(crate) fn with_index<const W: usize>(
+        qubits: &[usize],
+        mut p: PauliString<W>,
+        index: usize,
+    ) -> PauliString<W> {
+        const OPS: [PauliOp; 4] = [PauliOp::I, PauliOp::X, PauliOp::Y, PauliOp::Z];
+        for (i, &q) in qubits.iter().enumerate() {
+            p.set(q, OPS[(index >> (2 * i)) & 3]);
+        }
+        p
+    }
+
+    /// The index of the operators of `p` on `qubits`, as a Pauli channel and a transfer map
+    /// number the Pauli strings on their qubits.
     #[inline]
     pub(crate) fn channel_index<const W: usize>(qubits: &[usize], p: &PauliString<W>) -> usize {
         qubits
@@ -412,7 +657,10 @@ impl Gate {
                 p.set(b, pa);
                 false
             }
-            Gate::Rotation { .. } | Gate::PauliChannel { .. } | Gate::AmplitudeDamping { .. } => {
+            Gate::Rotation { .. }
+            | Gate::PauliChannel { .. }
+            | Gate::AmplitudeDamping { .. }
+            | Gate::TransferMap { .. } => {
                 unreachable!("not a Clifford gate")
             }
         }

@@ -15,6 +15,8 @@ which gives expectation values without holding a quantum state::
     value = pp.expectation(circuit, observable, max_weight=6, min_abs_coeff=1e-4)
 """
 
+from collections.abc import Callable
+
 from ._native import Circuit, PauliSum, propagate
 from ._qir import circuit_from_qir
 
@@ -27,12 +29,26 @@ def expectation(
     *,
     max_weight: int | None = None,
     min_abs_coeff: float = 1e-10,
-) -> float:
+    min_rel_coeff: float | None = None,
+    max_freq: int | None = None,
+    max_sins: int | None = None,
+    weight_damping: tuple[float, float] | None = None,
+    custom_truncation: Callable[[str, float | complex], bool] | None = None,
+) -> float | complex:
     """The expectation value of ``observable`` after ``circuit`` acts on the all-zero state.
 
-    The result is exact only if the truncation drops nothing; see :func:`propagate`.
+    The result is exact only if the truncations drop nothing; see :func:`propagate` for
+    what each of them drops.
     """
     evolved = propagate(
-        circuit, observable, max_weight=max_weight, min_abs_coeff=min_abs_coeff
+        circuit,
+        observable,
+        max_weight=max_weight,
+        min_abs_coeff=min_abs_coeff,
+        min_rel_coeff=min_rel_coeff,
+        max_freq=max_freq,
+        max_sins=max_sins,
+        weight_damping=weight_damping,
+        custom_truncation=custom_truncation,
     )
     return evolved.overlap_with_zero()

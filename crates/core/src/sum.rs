@@ -1,16 +1,17 @@
-//! A sparse sum of Pauli strings with real coefficients.
+//! A sparse sum of Pauli strings.
 
-use crate::{Error, PauliOp, PauliString};
+use crate::{Coefficient, Error, PauliOp, PauliString};
 use rustc_hash::FxHashMap;
 
-/// The operator `sum_k c_k P_k` on `num_qubits` qubits, with real `c_k` and distinct Pauli strings `P_k`.
+/// The operator `sum_k c_k P_k` on `num_qubits` qubits, with distinct Pauli strings `P_k` and
+/// real or complex coefficients `c_k`.
 #[derive(Clone, Debug)]
-pub struct PauliSum<const W: usize> {
+pub struct PauliSum<const W: usize, C = f64> {
     num_qubits: usize,
-    pub(crate) terms: FxHashMap<PauliString<W>, f64>,
+    pub(crate) terms: FxHashMap<PauliString<W>, C>,
 }
 
-impl<const W: usize> PauliSum<W> {
+impl<const W: usize, C: Coefficient> PauliSum<W, C> {
     /// The empty sum on `num_qubits` qubits.
     pub fn new(num_qubits: usize) -> Result<Self, Error> {
         if num_qubits > PauliString::<W>::CAPACITY {
@@ -41,7 +42,7 @@ impl<const W: usize> PauliSum<W> {
     }
 
     /// Adds `coeff * P`, where `P` is given as `(qubit, operator)` pairs on distinct qubits.
-    pub fn add(&mut self, ops: &[(usize, PauliOp)], coeff: f64) -> Result<(), Error> {
+    pub fn add(&mut self, ops: &[(usize, PauliOp)], coeff: C) -> Result<(), Error> {
         for (i, &(q, _)) in ops.iter().enumerate() {
             if q >= self.num_qubits {
                 return Err(Error::QubitOutOfRange {
@@ -58,24 +59,25 @@ impl<const W: usize> PauliSum<W> {
     }
 
     /// Adds `coeff * string`. The string must not reach beyond `num_qubits`.
-    pub fn add_string(&mut self, string: PauliString<W>, coeff: f64) {
+    pub fn add_string(&mut self, string: PauliString<W>, coeff: C) {
         debug_assert!(string.max_qubit().is_none_or(|q| q < self.num_qubits));
-        *self.terms.entry(string).or_insert(0.0) += coeff;
+        let entry = self.terms.entry(string).or_insert(C::ZERO);
+        *entry = entry.plus(coeff);
     }
 
     /// The coefficient of `string`, zero if it is not in the sum.
     #[must_use]
-    pub fn coeff(&self, string: &PauliString<W>) -> f64 {
-        self.terms.get(string).copied().unwrap_or(0.0)
+    pub fn coeff(&self, string: &PauliString<W>) -> C {
+        self.terms.get(string).copied().unwrap_or(C::ZERO)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&PauliString<W>, f64)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&PauliString<W>, C)> {
         self.terms.iter().map(|(p, &c)| (p, c))
     }
 
     /// The terms ordered by Pauli string, for output that does not depend on hashing.
     #[must_use]
-    pub fn sorted_terms(&self) -> Vec<(PauliString<W>, f64)> {
+    pub fn sorted_terms(&self) -> Vec<(PauliString<W>, C)> {
         let mut terms: Vec<_> = self.terms.iter().map(|(&p, &c)| (p, c)).collect();
         terms.sort_unstable_by_key(|term| term.0);
         terms
@@ -84,7 +86,7 @@ impl<const W: usize> PauliSum<W> {
     /// The expectation value `<0...0| O |0...0>`: the sum of the coefficients of the strings
     /// made of `I` and `Z` only.
     #[must_use]
-    pub fn overlap_with_zero(&self) -> f64 {
+    pub fn overlap_with_zero(&self) -> C {
         sum_in_order(
             self.terms
                 .iter()
@@ -96,7 +98,7 @@ impl<const W: usize> PauliSum<W> {
     /// The expectation value `<+...+| O |+...+>`: the sum of the coefficients of the strings
     /// made of `I` and `X` only.
     #[must_use]
-    pub fn overlap_with_plus(&self) -> f64 {
+    pub fn overlap_with_plus(&self) -> C {
         sum_in_order(
             self.terms
                 .iter()
@@ -107,7 +109,7 @@ impl<const W: usize> PauliSum<W> {
 
     /// The expectation value in the computational basis state whose qubits in `ones` are 1
     /// and whose other qubits are 0.
-    pub fn overlap_with_computational(&self, ones: &[usize]) -> Result<f64, Error> {
+    pub fn overlap_with_computational(&self, ones: &[usize]) -> Result<C, Error> {
         if let Some(&qubit) = ones.iter().find(|&&q| q >= self.num_qubits) {
             return Err(Error::QubitOutOfRange {
                 qubit,
@@ -122,21 +124,21 @@ impl<const W: usize> PauliSum<W> {
             self.terms
                 .iter()
                 .filter(|(p, _)| !p.has_x_or_y())
-                .map(|(&p, &c)| (p, if p.commutes(&flips) { c } else { -c })),
+                .map(|(&p, &c)| (p, if p.commutes(&flips) { c } else { c.scale(-1.0) })),
         ))
     }
 
     /// The expectation value in the maximally mixed state, `Tr[O] / 2^n`: the coefficient of
     /// the identity.
     #[must_use]
-    pub fn overlap_with_max_mixed(&self) -> f64 {
+    pub fn overlap_with_max_mixed(&self) -> C {
         self.coeff(&PauliString::identity())
     }
 
     /// The sum over the Pauli strings of the products of their coefficients in the two sums,
-    /// which is `Tr[A B] / 2^n`.
+    /// which is `Tr[A B] / 2^n`. Complex coefficients are not conjugated.
     #[must_use]
-    pub fn scalar_product(&self, other: &Self) -> f64 {
+    pub fn scalar_product(&self, other: &Self) -> C {
         let (small, large) = if self.len() <= other.len() {
             (self, other)
         } else {
@@ -146,23 +148,34 @@ impl<const W: usize> PauliSum<W> {
             small
                 .terms
                 .iter()
-                .filter_map(|(p, &c)| large.terms.get(p).map(|&d| (*p, c * d))),
+                .filter_map(|(p, &c)| large.terms.get(p).map(|&d| (*p, c.times(d)))),
         )
     }
 
-    /// The sum of the squared coefficients, which unitary gates preserve when nothing is truncated.
+    /// The sum of the squared absolute values of the coefficients, which unitary gates
+    /// preserve when nothing is truncated.
     #[must_use]
     pub fn norm_sqr(&self) -> f64 {
-        let mut squares: Vec<f64> = self.terms.values().map(|c| c * c).collect();
+        let mut squares: Vec<f64> = self.terms.values().map(|c| c.norm_sqr()).collect();
         squares.sort_unstable_by(f64::total_cmp);
         squares.iter().sum()
+    }
+
+    /// The largest absolute value of a coefficient, zero for the empty sum.
+    #[must_use]
+    pub fn max_abs_coeff(&self) -> f64 {
+        self.terms.values().map(|c| c.abs()).fold(0.0, f64::max)
     }
 }
 
 /// Sums the values in the order of their Pauli strings, so that the result does not depend
 /// on the order in which a hash map yields them.
-fn sum_in_order<const W: usize>(terms: impl Iterator<Item = (PauliString<W>, f64)>) -> f64 {
-    let mut terms: Vec<(PauliString<W>, f64)> = terms.collect();
+fn sum_in_order<const W: usize, C: Coefficient>(
+    terms: impl Iterator<Item = (PauliString<W>, C)>,
+) -> C {
+    let mut terms: Vec<(PauliString<W>, C)> = terms.collect();
     terms.sort_unstable_by_key(|term| term.0);
-    terms.iter().map(|&(_, value)| value).sum()
+    terms
+        .iter()
+        .fold(C::ZERO, |total, &(_, value)| total.plus(value))
 }
