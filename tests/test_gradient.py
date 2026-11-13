@@ -152,6 +152,29 @@ def test_a_truncated_gradient_is_close_and_does_not_depend_on_threads():
         assert pp.gradient(circuit, observable, max_weight=4, min_abs_coeff=1e-4, threads=threads) == truncated
 
 
+@pytest.mark.parametrize(
+    "option",
+    [{"max_weight": 3}, {"min_abs_coeff": 1e-3}, {"min_rel_coeff": 1e-3}, {"weight_damping": (0.3, 1e-4)}],
+    ids=lambda option: next(iter(option)),
+)
+def test_every_truncation_reaches_a_gradient(option):
+    rng = random.Random(3)
+    n, layers = 16, 3
+    angles = [rng.uniform(0.1, 0.5) for _ in range(layers * (2 * n - 1))]
+    circuit = trotter(n, layers, angles)
+    observable = pp.PauliSum(n)
+    observable.add("Z", [7])
+
+    exact = pp.gradient(circuit, observable, min_abs_coeff=0.0)
+    options = {"min_abs_coeff": 0.0, **option}
+    value, derivatives = pp.gradient(circuit, observable, **options)
+    # The value is that of the propagation with the same truncation, which drops terms.
+    assert value == pp.expectation(circuit, observable, **options)
+    assert value != exact[0]
+    error = sum(abs(a - b) for a, b in zip(derivatives, exact[1]))
+    assert 0 < error < 0.1 * sum(map(abs, exact[1]))
+
+
 def test_t_gates_are_rotations_with_a_derivative():
     circuit = pp.Circuit(1)
     circuit.h(0)

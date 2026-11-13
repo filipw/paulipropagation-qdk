@@ -217,6 +217,14 @@ fn circuits_that_cannot_be_undone_are_rejected() {
     }
     let shrinking = [rotation.clone(), Gate::transfer_map(&[0], &matrix).unwrap()];
     assert!(gradient(&shrinking, &observable, &none, &State::Zero).is_err());
+    // A transfer map that keeps the size of every Pauli operator and still is not that of
+    // a unitary: X and Y both become X.
+    let mut matrix = vec![0.0; 16];
+    for (to, from) in [(0, 0), (1, 1), (1, 2), (3, 3)] {
+        matrix[to * 4 + from] = 1.0;
+    }
+    let folding = [rotation.clone(), Gate::transfer_map(&[0], &matrix).unwrap()];
+    assert!(gradient(&folding, &observable, &none, &State::Zero).is_err());
 
     let counted = Truncation {
         max_freq: Some(3),

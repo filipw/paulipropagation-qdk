@@ -147,6 +147,35 @@ fn a_custom_rule_drops_terms_of_a_surrogate() {
 }
 
 #[test]
+fn a_surrogate_holds_no_nodes_of_dropped_terms() {
+    let limits = PathLimits::default();
+    let has_y = |string: &PauliString<1>| string.label(1).contains('Y');
+
+    // Z becomes cos Z + sin Y, and a rule drops the strings with a Y.
+    let mut observable = PauliSum::<1>::new(1).unwrap();
+    observable.add(&[(0, PauliOp::Z)], 1.0).unwrap();
+    let circuit = [Gate::rx(0.3, 0)];
+    let all = Surrogate::new(&circuit, &observable, &limits, None).unwrap();
+    assert_eq!((all.len(), all.num_nodes()), (2, 2));
+    let kept = Surrogate::new(&circuit, &observable, &limits, Some(&has_y)).unwrap();
+    assert_eq!((kept.len(), kept.num_nodes()), (1, 1));
+    let value = kept.evaluate(&[0.7]).unwrap().sorted_terms();
+    assert_eq!(value.len(), 1);
+    assert_eq!(value[0].0, observable.sorted_terms()[0].0);
+    assert!((value[0].1 - 0.7f64.cos()).abs() < TOL);
+
+    // X becomes cos X + sin Y in the last gate, and the Y becomes cos Y + sin Z in the
+    // first: four nodes, of which the rule leaves the one of X.
+    let mut observable = PauliSum::<1>::new(1).unwrap();
+    observable.add(&[(0, PauliOp::X)], 1.0).unwrap();
+    let circuit = [Gate::rx(0.3, 0), Gate::rz(0.4, 0)];
+    let all = Surrogate::new(&circuit, &observable, &limits, None).unwrap();
+    assert_eq!((all.len(), all.num_nodes()), (3, 4));
+    let kept = Surrogate::new(&circuit, &observable, &limits, Some(&has_y)).unwrap();
+    assert_eq!((kept.len(), kept.num_nodes()), (1, 1));
+}
+
+#[test]
 fn a_surrogate_rejects_what_it_cannot_hold() {
     let mut observable = PauliSum::<1>::new(2).unwrap();
     observable.add(&[(0, PauliOp::Z)], 1.0).unwrap();
@@ -157,6 +186,12 @@ fn a_surrogate_rejects_what_it_cannot_hold() {
     assert!(Surrogate::new(&damped, &observable, &limits, None).is_err());
     let out_of_range = [Gate::rx(0.3, 2)];
     assert!(Surrogate::new(&out_of_range, &observable, &limits, None).is_err());
+    let mut unchanged = vec![0.0; 16];
+    for index in 0..4 {
+        unchanged[index * 4 + index] = 1.0;
+    }
+    let mapped = [Gate::transfer_map(&[0], &unchanged).unwrap()];
+    assert!(Surrogate::new(&mapped, &observable, &limits, None).is_err());
 
     let circuit = [Gate::rx(0.3, 0), Gate::H(1), Gate::rzz(0.2, 0, 1)];
     let surrogate = Surrogate::new(&circuit, &observable, &limits, None).unwrap();

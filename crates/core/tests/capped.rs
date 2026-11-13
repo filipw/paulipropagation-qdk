@@ -328,6 +328,19 @@ fn what_cannot_be_done_is_rejected() {
     let beyond = [Gate::rx(0.3, 2)];
     assert!(propagate_capped(&beyond, &mut sum, &none, picture, None, 5).is_err());
     assert_eq!(sum.len(), 1);
+    // A gate that cannot be applied leaves the sum as it was, also where gates that change
+    // the sum come before it.
+    let before = sum.sorted_terms();
+    let last_to_act = [Gate::rx(0.3, 2), Gate::rzz(0.4, 0, 1), Gate::rx(0.2, 0)];
+    assert!(propagate_capped(&last_to_act, &mut sum, &none, picture, None, 2).is_err());
+    assert_eq!(sum.sorted_terms(), before);
+    let last_to_act = [Gate::rx(0.2, 0), Gate::rzz(0.4, 0, 1), Gate::rx(0.3, 2)];
+    let state = Picture::Schrodinger;
+    assert!(propagate_capped(&last_to_act, &mut sum, &none, state, None, 2).is_err());
+    assert_eq!(sum.sorted_terms(), before);
+    let mut changed = sum.clone();
+    propagate_capped(&last_to_act[..2], &mut changed, &none, state, None, 2).unwrap();
+    assert_ne!(changed.sorted_terms(), before);
 
     // A custom rule is applied like the other truncations.
     let rule = |string: &PauliString<1>, _: f64| string.weight() > 1;

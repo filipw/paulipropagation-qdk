@@ -6,8 +6,9 @@ mod common;
 use common::*;
 use num_complex::Complex64;
 use pauliprop::{
-    estimate_mse, propagate_resampling, propagate_with, resample, sample_paths, Coefficient, Gate,
-    PathLimits, PauliOp, PauliString, PauliSum, Picture, Resampling, Rng, State, Truncation,
+    estimate_mse, propagate_resampling, propagate_with, resample, sample_paths, sample_sum,
+    Coefficient, Gate, PathLimits, PauliOp, PauliString, PauliSum, Picture, Resampling, Rng, State,
+    Truncation,
 };
 use rand::{rngs::StdRng, Rng as _, SeedableRng};
 use std::collections::BTreeMap;
@@ -314,6 +315,27 @@ fn requests_that_cannot_be_met_are_rejected() {
         )
     };
     assert!(mse(&noisy, 10, &[1.0]).is_err());
+    // A transfer map is not a Clifford gate, also where it changes nothing.
+    let mut unchanged = vec![0.0; 16];
+    for index in 0..4 {
+        unchanged[index * 4 + index] = 1.0;
+    }
+    let mapped = [
+        Gate::rx(0.3, 0),
+        Gate::transfer_map(&[0], &unchanged).unwrap(),
+    ];
+    assert!(sample_paths(&mapped, 3, &mut terms, heisenberg, false, &mut generator).is_err());
+    assert!(sample_sum(&mapped, &sum, 10, heisenberg, false, &mut generator).is_err());
+    assert!(sample_sum(
+        &[Gate::rx(0.3, 0)],
+        &sum,
+        0,
+        heisenberg,
+        false,
+        &mut generator
+    )
+    .is_err());
+    assert!(mse(&mapped, 10, &[1.0]).is_err());
     assert!(mse(&[Gate::rx(0.3, 0)], 10, &[]).is_err());
     assert!(mse(&[Gate::rx(0.3, 0)], 0, &[1.0]).is_err());
     assert!(mse(&[Gate::rx(0.3, 0)], 10, &[1.0]).is_ok());
@@ -489,6 +511,88 @@ fn paths_sampled_by_squares_keep_the_coefficient_and_follow_the_squared_factors(
     }
 }
 
+#[test]
+fn clifford_gates_change_no_sign_of_paths_sampled_by_squares() {
+    let mut rng = StdRng::seed_from_u64(54);
+    let n = 4;
+    let circuit: Vec<Gate> = (0..40)
+        .map(|_| loop {
+            let gate = random_gate(&mut rng, n);
+            if !matches!(gate, Gate::Rotation { .. }) {
+                break gate;
+            }
+        })
+        .collect();
+    let sum = random_sum(&mut rng, n, 30);
+    for picture in [Picture::Heisenberg, Picture::Schrodinger] {
+        let mut exact = sum.clone();
+        propagate_with(&circuit, &mut exact, &Truncation::none(), picture, None).unwrap();
+        let start = sum.sorted_terms();
+
+        // Without squares a path through Clifford gates is the propagation of its term.
+        let mut plain = start.clone();
+        sample_paths(&circuit, n, &mut plain, picture, false, &mut Rng::new(1)).unwrap();
+        let mut flipped = 0;
+        for ((string, coeff), (_, before)) in plain.iter().zip(&start) {
+            assert_eq!(*coeff, exact.coeff(string));
+            assert_eq!(coeff.abs(), before.abs());
+            flipped += usize::from(coeff != before);
+        }
+        assert!(flipped > 5, "{flipped} signs changed");
+
+        // With squares it ends on the same string with the coefficient it started with.
+        let mut squared = start.clone();
+        sample_paths(&circuit, n, &mut squared, picture, true, &mut Rng::new(1)).unwrap();
+        for (((string, coeff), (_, before)), (expected, _)) in
+            squared.iter().zip(&start).zip(&plain)
+        {
+            assert_eq!(string, expected);
+            assert_eq!(coeff, before);
+        }
+    }
+}
+
+#[test]
+fn the_mean_of_paths_is_taken_over_all_samples() {
+    // More samples than are held at a time: through Clifford gates every path is the
+    // propagated term, and so is their mean.
+    let n = 2;
+    let circuit = [Gate::H(0), Gate::Cx(0, 1), Gate::S(1), Gate::X(0)];
+    let mut sum = Sum::new(n).unwrap();
+    sum.add(&[(0, PauliOp::Z), (1, PauliOp::Y)], 0.8).unwrap();
+    sum.add(&[(1, PauliOp::X)], -0.3).unwrap();
+    let mut exact = sum.clone();
+    let heisenberg = Picture::Heisenberg;
+    propagate_with(&circuit, &mut exact, &Truncation::none(), heisenberg, None).unwrap();
+    for samples in [1, 1000, 65_536, 65_537, 150_000] {
+        let mean =
+            sample_sum(&circuit, &sum, samples, heisenberg, false, &mut Rng::new(2)).unwrap();
+        assert_eq!(mean.len(), exact.len());
+        for (string, coeff) in exact.sorted_terms() {
+            assert!(
+                (mean.coeff(&string) - coeff).abs() < 1e-9,
+                "{samples} samples: {} for {coeff}",
+                mean.coeff(&string)
+            );
+        }
+    }
+
+    // And through a rotation, the mean of that many paths is close to the propagated sum.
+    let circuit = [Gate::rx(0.9, 0), Gate::rzz(0.5, 0, 1)];
+    let mut exact = sum.clone();
+    propagate_with(&circuit, &mut exact, &Truncation::none(), heisenberg, None).unwrap();
+    let samples = 150_000;
+    let mean = sample_sum(&circuit, &sum, samples, heisenberg, false, &mut Rng::new(3)).unwrap();
+    for (string, coeff) in exact.sorted_terms() {
+        // A path carries at most (|cos| + |sin|)^2 < 2 times the size of its term.
+        assert!(
+            (mean.coeff(&string) - coeff).abs() < 6.0 * 2.0 / (samples as f64).sqrt(),
+            "{} for {coeff}",
+            mean.coeff(&string)
+        );
+    }
+}
+
 fn trotter_circuit(rng: &mut StdRng, n: usize, layers: usize) -> Vec<Gate> {
     let mut circuit = Vec::new();
     for _ in 0..layers {
@@ -528,6 +632,72 @@ fn a_resampling_propagation_that_never_resamples_is_the_propagation() {
         )
         .unwrap();
         assert_eq!(sampled.sorted_terms(), expected.sorted_terms());
+    }
+}
+
+#[test]
+fn a_resampling_propagation_is_its_steps_written_out() {
+    // Gate by gate: the propagation through the gate, and a resampling of the sum once it
+    // is larger than the largest size, with random numbers from one generator.
+    let mut rng = StdRng::seed_from_u64(55);
+    let n = 6;
+    let circuit = trotter_circuit(&mut rng, n, 5);
+    let truncation = Truncation {
+        max_weight: Some(4),
+        min_abs_coeff: 1e-6,
+        ..Truncation::none()
+    };
+    let cases = [
+        (None, false),
+        (None, true),
+        (Some(Resampling::Multinomial), false),
+        (Some(Resampling::Multinomial), true),
+        (Some(Resampling::systematic()), false),
+        (Some(Resampling::systematic()), true),
+        (Some(Resampling::SemiDeterministic), false),
+    ];
+    for picture in [Picture::Heisenberg, Picture::Schrodinger] {
+        let start = random_sum(&mut rng, n, 3);
+        for (method, squared) in cases {
+            let (max_size, resampling_size) = (30, 20);
+            let mut expected = start.clone();
+            let mut generator = Rng::new(11);
+            let mut resampled = 0;
+            let in_order: Vec<&Gate> = match picture {
+                Picture::Heisenberg => circuit.iter().rev().collect(),
+                Picture::Schrodinger => circuit.iter().collect(),
+            };
+            for gate in in_order {
+                let gate = std::slice::from_ref(gate);
+                propagate_with(gate, &mut expected, &truncation, picture, None).unwrap();
+                if expected.len() > max_size {
+                    let size = resampling_size;
+                    resample(&mut expected, size, method, squared, &mut generator).unwrap();
+                    resampled += 1;
+                }
+            }
+            assert!(resampled >= 2, "resampled {resampled} times");
+
+            let mut sum = start.clone();
+            propagate_resampling(
+                &circuit,
+                &mut sum,
+                &truncation,
+                picture,
+                None,
+                max_size,
+                resampling_size,
+                method,
+                squared,
+                &mut Rng::new(11),
+            )
+            .unwrap();
+            assert_eq!(
+                sum.sorted_terms(),
+                expected.sorted_terms(),
+                "{method:?}, squared {squared}"
+            );
+        }
     }
 }
 
@@ -706,6 +876,47 @@ fn the_estimated_error_is_the_weight_of_the_dropped_paths() {
             "{limits:?}: {estimate}, expected {expected}"
         );
     }
+
+    // In a state in which Pauli strings have the value -1, the squares of the values are
+    // added up: the estimate is that of the state of zeros, path for path.
+    let limits = PathLimits {
+        max_sins: Some(1),
+        ..PathLimits::default()
+    };
+    let ones = [1usize, 2];
+    let dropped = paths_with_limits(&generators, start, probability, &|_, _, sins| sins > 1);
+    let value = |path: &PauliString<1>| State::Computational(&ones).expectation_of(path, n);
+    let signed: f64 = dropped
+        .iter()
+        .filter(|(_, _, dead)| *dead)
+        .map(|(path, weight, _)| weight * value(path))
+        .sum();
+    let squares: f64 = dropped
+        .iter()
+        .filter(|(_, _, dead)| *dead)
+        .map(|(path, weight, _)| weight * value(path).powi(2))
+        .sum();
+    assert!((signed - squares).abs() > 0.02, "{signed} and {squares}");
+    let radii = vec![radius; generators.len()];
+    let in_state = |state: &State<'_, 1>| {
+        estimate_mse(
+            &circuit,
+            n,
+            &start,
+            1.0,
+            samples,
+            &radii,
+            &limits,
+            None,
+            state,
+            Picture::Heisenberg,
+            &mut Rng::new(12),
+        )
+        .unwrap()
+    };
+    let estimate = in_state(&State::Computational(&ones));
+    assert_eq!(estimate, in_state(&State::Zero));
+    assert!((estimate - squares).abs() < 6.0 * (squares * (1.0 - squares) / samples as f64).sqrt());
 
     // Limits that drop nothing leave no error, and a custom rule that drops everything
     // leaves the squared weight of all the paths that count.

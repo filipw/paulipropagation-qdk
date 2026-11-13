@@ -286,6 +286,24 @@ def test_a_resampling_propagation_stays_small_and_is_unbiased():
     assert mean == pytest.approx(exact.overlap_with_zero(), abs=6 * error)
 
 
+def test_a_resampling_propagation_by_squares_keeps_the_sum_of_squares():
+    n = 10
+    circuit = trotter(n, 4)
+    observable = pp.PauliSum(n)
+    observable.add("Z", [4], 0.8)
+    observable.add("ZZ", [6, 7], -0.6)
+    assert len(pp.propagate(circuit, observable, min_abs_coeff=0.0)) > 3000
+
+    # Rotations keep the sum of the squared coefficients, and so does resampling by squares.
+    options = dict(max_size=300, min_abs_coeff=0.0, seed=4)
+    by_squares = pp.mcpropagate(circuit, observable, squared=True, **options)
+    assert 0 < len(by_squares) <= 600
+    assert sum(c * c for _, c in by_squares.terms()) == pytest.approx(1.0)
+    # Resampling by the coefficients themselves keeps the sum on average, not its squares.
+    plain = pp.mcpropagate(circuit, observable, **options)
+    assert abs(sum(c * c for _, c in plain.terms()) - 1.0) > 1e-3
+
+
 def test_a_resampling_propagation_with_a_seed_is_reproducible():
     n = 14
     circuit = trotter(n, 6)
@@ -299,6 +317,15 @@ def test_a_resampling_propagation_with_a_seed_is_reproducible():
     for method in ("multinomial", "systematic"):
         assert len(pp.mcpropagate(circuit, observable, method=method, **options)) <= 6000
     assert len(pp.mcpropagate(circuit, observable, squared=True, **options)) <= 6000
+
+    # Unless it is given, the resampling size is half the largest size, rounded up.
+    options = dict(max_weight=6, min_abs_coeff=1e-8, seed=11)
+    for max_size, half in ((3000, 1500), (2999, 1500)):
+        halved = pp.mcpropagate(circuit, observable, max_size=max_size, **options)
+        given = pp.mcpropagate(circuit, observable, max_size=max_size, resampling_size=half, **options)
+        assert halved.terms() == given.terms()
+        other = pp.mcpropagate(circuit, observable, max_size=max_size, resampling_size=half - 1, **options)
+        assert halved.terms() != other.terms()
 
     # A size that is never reached leaves the propagation as it is.
     plain = pp.propagate(circuit, observable, max_weight=3, min_abs_coeff=1e-8)
