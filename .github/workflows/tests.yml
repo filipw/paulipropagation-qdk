@@ -37,6 +37,6 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate || source .venv/Scripts/activate
-          python -m pip install maturin pytest numpy qdk
+          python -m pip install maturin pytest numpy qdk stim
           maturin develop --release
           python -m pytest -q

@@ -6,7 +6,6 @@ truncation after every gate have to agree for the terms to match.
 """
 
 import json
-import math
 from pathlib import Path
 
 import pytest
@@ -38,8 +37,20 @@ NOISE = {
     "AmplitudeDampingNoise": "amplitude_damping",
 }
 
-# Coefficients agree to rounding. The slack is for the two reference gates that are
-# rotations here: a rotation by pi/2 leaves cos(pi/2) = 6e-17 where a Clifford gate leaves 0.
+# Clifford gates of PauliPropagation.jl that are products of Clifford gates here, in the order
+# of the circuit. The square root of Y is exp(-i pi/4 Y) up to a phase, and the table of
+# ZZpihalf is that of exp(+i pi/4 ZZ).
+PRODUCTS = {
+    "SY": [("h", (0,)), ("x", (0,))],
+    "ZZpihalf": [("s_adj", (0,)), ("s_adj", (1,)), ("cz", (0, 1))],
+}
+# The factors of ZZpihalf commute, and only the last of them changes the weight of a Pauli
+# string. It has to act first: a truncation by weight after it then sees the string that the
+# reference sees after its one gate. An observable meets the gates of a circuit from the end,
+# a state from the start.
+ACTS_FIRST_ON_STATES = {"ZZpihalf": [("cz", (0, 1)), ("s_adj", (0,)), ("s_adj", (1,))]}
+
+# Coefficients agree to rounding.
 COEFF_TOL = 1e-13
 
 
@@ -56,12 +67,10 @@ def build_circuit(case, matrices_as_unitaries: bool = False) -> pp.Circuit:
             circuit.rotation(gate["paulis"], qubits, gate["theta"])
         elif kind in NOISE:
             getattr(circuit, NOISE[kind])(gate["strength"], qubits[0])
-        elif kind == "SY":
-            # The square root of Y is exp(-i pi/4 Y) up to a phase.
-            circuit.ry(math.pi / 2, qubits[0])
-        elif kind == "ZZpihalf":
-            # The reference table for this gate is that of exp(+i pi/4 ZZ).
-            circuit.rzz(-math.pi / 2, qubits[0], qubits[1])
+        elif kind in PRODUCTS:
+            products = PRODUCTS if case.get("heisenberg", True) else PRODUCTS | ACTS_FIRST_ON_STATES
+            for name, places in products[kind]:
+                getattr(circuit, name)(*(qubits[place] for place in places))
         elif kind == "T":
             circuit.t(qubits[0])
         elif kind == "TransferMap":
@@ -122,6 +131,21 @@ def test_reference_cases_exist():
 def test_terms_match_the_julia_reference(name):
     case = json.loads((REFERENCE_DIR / f"{name}.json").read_text())
     assert_matches(run_case(case), case)
+
+
+def test_rounding_stays_small_through_a_deep_circuit():
+    """The reference propagated this circuit with numbers of 256 bits, so the difference from
+    it is the rounding of this package, which stays below 1e-14 through six thousand
+    rotations."""
+    case = json.loads((REFERENCE_DIR / "deep_circuit_exact_5.json").read_text())
+    rotations = sum(gate["gate"] == "rotation" for gate in case["circuit"])
+    assert rotations > 5000 and case["min_abs_coeff"] == 0.0
+    ours = dict(run_case(case).terms())
+    theirs = {label: number(coeff) for label, coeff in case["terms"]}
+    assert len(theirs) > 1000
+    worst = max(abs(ours.get(label, 0.0) - theirs.get(label, 0.0)) for label in ours.keys() | theirs.keys())
+    assert worst < 1e-14
+    assert sum(coeff**2 for coeff in ours.values()) == pytest.approx(1.25, abs=1e-12, rel=0)
 
 
 def test_unitary_matrices_match_the_transfer_maps_of_the_reference():

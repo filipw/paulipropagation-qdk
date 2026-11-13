@@ -22,7 +22,8 @@ function gatetojson(gate::PauliRotation, theta)
 end
 gatetojson(gate::CliffordGate) = Dict("gate" => string(gate.symbol), "qubits" => gate.qinds .- 1)
 gatetojson(gate::TGate) = Dict("gate" => "T", "qubits" => [gate.qind - 1])
-gatetojson(gate::FrozenGate) = gatetojson(gate.gate, gate.parameter)
+# A gate with its parameter fixed is written as the gate, marked as frozen.
+gatetojson(gate::FrozenGate) = merge(gatetojson(gate.gate, gate.parameter), Dict("frozen" => true))
 function gatetojson(gate::ParametrizedNoiseChannel, strength)
     return Dict("gate" => string(nameof(typeof(gate))), "qubits" => [gate.qind - 1], "strength" => strength)
 end

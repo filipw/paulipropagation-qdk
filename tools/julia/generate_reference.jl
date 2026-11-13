@@ -230,6 +230,14 @@ let nq = 7, rng = MersenneTwister(6)
     writecase("complex_mixed_gates_truncated_7", nq, circuit, params, observable; min_abs_coeff=1e-3, max_weight=5)
 end
 
+# What the coefficients are when nothing is lost to rounding: a deep circuit without truncation,
+# propagated with coefficients and angles of 256 bits. The file holds them rounded to 64 bits.
+let nq = 5, rng = MersenneTwister(11)
+    circuit, params = randomcircuit(rng, nq, 12_000; one_qubit=[:H, :X, :Y, :Z, :S, :SX], two_qubit=[:CNOT, :CZ, :SWAP])
+    observable = [([:Z], [3], big(1.0)), ([:X, :Y], [1, 4], big(-0.5))]
+    writecase("deep_circuit_exact_5", nq, circuit, big.(params), observable; min_abs_coeff=0.0)
+end
+
 "A random circuit as `randomnoisycircuit` makes, without the amplitude damping that only acts on observables."
 function randompaulinoisecircuit(rng, nq, ngates)
     unitary_circuit, unitary_params = randomcircuit(rng, nq, ngates)

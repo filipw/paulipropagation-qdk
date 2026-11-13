@@ -73,6 +73,87 @@ const METHODS: [Resampling; 4] = [
     Resampling::SemiDeterministic,
 ];
 
+/// Seeds, the first six numbers and the 1001st number of xoshiro256** whose state is filled
+/// with four numbers of splitmix64 started at the seed. They were printed by the reference
+/// implementations of the two generators by Blackman and Vigna, `xoshiro256starstar.c` and
+/// `splitmix.c` of <https://prng.di.unimi.it>.
+const GENERATOR_VECTORS: [(u64, [u64; 6], u64); 5] = [
+    (
+        0,
+        [
+            11_091_344_671_253_066_420,
+            13_793_997_310_169_335_082,
+            1_900_383_378_846_508_768,
+            7_684_712_102_626_143_532,
+            13_521_403_990_117_723_737,
+            18_442_103_541_295_991_498,
+        ],
+        3_215_403_766_075_632_002,
+    ),
+    (
+        1,
+        [
+            12_966_619_160_104_079_557,
+            9_600_361_134_598_540_522,
+            10_590_380_919_521_690_900,
+            7_218_738_570_589_545_383,
+            12_860_671_823_995_680_371,
+            2_648_436_617_965_840_162,
+        ],
+        14_841_950_361_884_779_394,
+    ),
+    (
+        42,
+        [
+            1_546_998_764_402_558_742,
+            6_990_951_692_964_543_102,
+            12_544_586_762_248_559_009,
+            17_057_574_109_182_124_193,
+            18_295_552_978_065_317_476,
+            14_199_186_830_065_750_584,
+        ],
+        1_103_426_724_799_410_610,
+    ),
+    (
+        1_234_567,
+        [
+            3_504_822_795_582_309_479,
+            1_819_558_768_956_484_042,
+            1_250_851_346_055_027_673,
+            16_940_231_675_099_994_102,
+            11_585_879_347_611_423_030,
+            8_134_400_763_355_999_650,
+        ],
+        8_702_727_793_300_186_723,
+    ),
+    (
+        u64::MAX,
+        [
+            10_328_197_420_357_168_392,
+            14_156_678_507_024_973_869,
+            9_357_971_779_955_476_126,
+            13_791_585_006_304_312_367,
+            10_463_432_026_814_718_762,
+            13_498_236_496_097_551_653,
+        ],
+        1_855_756_785_506_932_879,
+    ),
+];
+
+#[test]
+fn the_generator_gives_the_numbers_of_its_reference_implementation() {
+    for (seed, first, later) in GENERATOR_VECTORS {
+        let mut rng = Rng::new(seed);
+        let numbers: Vec<u64> = (0..1001).map(|_| rng.next_u64()).collect();
+        assert_eq!(numbers[..6], first, "seed {seed}");
+        assert_eq!(numbers[1000], later, "seed {seed}");
+
+        // A number in [0, 1) is the upper 53 bits of the next number.
+        let uniform = Rng::new(seed).uniform();
+        assert_eq!(uniform, (first[0] >> 11) as f64 / 9_007_199_254_740_992.0);
+    }
+}
+
 #[test]
 fn the_generator_gives_the_same_numbers_for_the_same_seed() {
     let (mut a, mut b, mut other) = (Rng::new(7), Rng::new(7), Rng::new(8));

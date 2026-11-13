@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = ["pyqir>=0.12.8,<0.13"]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "numpy>=1.24", "qdk>=1.34"]
+test = ["pytest>=8", "numpy>=1.24", "qdk>=1.34", "stim>=1.13"]
 
 [tool.maturin]
 manifest-path = "crates/py/Cargo.toml"
