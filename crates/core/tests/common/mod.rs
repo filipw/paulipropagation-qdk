@@ -3,8 +3,12 @@
 //! Nothing here uses the engine: gates are built from their textbook matrices and operators
 //! are expanded in the Pauli basis by traces. Qubit 0 is the most significant bit of a
 //! matrix index.
+//!
+//! Every test that uses these helpers runs under the memory cap of [`memory`].
 
 #![allow(dead_code)]
+
+mod memory;
 
 use num_complex::Complex64 as C;
 use pauliprop::{

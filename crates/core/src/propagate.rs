@@ -1,9 +1,7 @@
 //! Propagation of a Pauli sum through a circuit.
 
 use crate::coeff::{Path, Tracked};
-use crate::{Coefficient, Gate, PauliString, PauliSum};
-use rustc_hash::FxHashMap;
-use std::collections::hash_map::Entry;
+use crate::{engine, Coefficient, Gate, PauliString, PauliSum};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,58 +139,104 @@ pub fn propagate_with<const W: usize, C: Coefficient>(
     picture: Picture,
     custom: Option<&CustomTruncation<'_, W, C>>,
 ) -> Result<(), Error> {
+    propagate_in_zones(circuit, sum, truncation, picture, custom, &Zones::default())
+}
+
+/// How the terms of a sum are spread over zones, which are worked on by different threads.
+///
+/// The result of a propagation does not depend on the zones. They only decide how much of
+/// the work can be done at the same time, and how much it costs to hand it out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Zones {
+    /// The number of zones doubles when the sum has more than this many terms per zone.
+    pub terms: usize,
+    /// The largest number of zones. It is rounded down to a power of two.
+    pub max: usize,
+}
+
+impl Default for Zones {
+    /// A single zone on one thread, and otherwise enough zones for all the threads of the
+    /// current rayon pool to find work in a large sum.
+    fn default() -> Self {
+        let threads = rayon::current_num_threads();
+        Self {
+            terms: 1024,
+            max: if threads == 1 { 1 } else { 8 * threads },
+        }
+    }
+}
+
+/// [`propagate_with`] with the zones chosen by the caller.
+pub fn propagate_in_zones<const W: usize, C: Coefficient>(
+    circuit: &[Gate],
+    sum: &mut PauliSum<W, C>,
+    truncation: &Truncation,
+    picture: Picture,
+    custom: Option<&CustomTruncation<'_, W, C>>,
+    zones: &Zones,
+) -> Result<(), Error> {
     for gate in circuit {
         gate.validate(sum.num_qubits())?;
     }
     let rules = Rules { truncation, custom };
+    let num_qubits = sum.num_qubits();
+    let (strings, coeffs) = sum.take_ordered();
 
     // The counters behind `max_freq` and `max_sins` are kept only when one of them is set.
-    if truncation.max_freq.is_some() || truncation.max_sins.is_some() {
-        let mut tracked: FxHashMap<PauliString<W>, Tracked<C>> = sum
-            .terms
-            .drain()
-            .map(|(p, c)| (p, Tracked::start(c)))
-            .collect();
-        run(circuit, &mut tracked, &rules, picture);
-        sum.terms
-            .extend(tracked.into_iter().map(|(p, path)| (p, path.coeff())));
+    let (strings, coeffs) = if rules.counts() {
+        let tracked: Vec<Tracked<C>> = coeffs.into_iter().map(Tracked::start).collect();
+        let (strings, tracked) = engine::run(
+            circuit, num_qubits, strings, tracked, &rules, picture, zones,
+        );
+        (strings, tracked.iter().map(Path::coeff).collect())
     } else {
-        run(circuit, &mut sum.terms, &rules, picture);
-    }
+        engine::run(circuit, num_qubits, strings, coeffs, &rules, picture, zones)
+    };
+    sum.set_ordered(strings, coeffs);
     Ok(())
 }
 
-struct Rules<'a, const W: usize, C> {
-    truncation: &'a Truncation,
-    custom: Option<&'a CustomTruncation<'a, W, C>>,
+/// The rules that decide which terms are dropped.
+pub(crate) struct Rules<'a, const W: usize, C> {
+    pub(crate) truncation: &'a Truncation,
+    pub(crate) custom: Option<&'a CustomTruncation<'a, W, C>>,
 }
 
 impl<const W: usize, C: Coefficient> Rules<'_, W, C> {
     /// Whether a rule reads the Pauli string, so that a Clifford gate can make it drop a term.
-    fn reads_string(&self) -> bool {
+    pub(crate) fn reads_string(&self) -> bool {
         self.truncation.max_weight.is_some()
             || self.truncation.weight_damping.is_some()
             || self.custom.is_some()
     }
 
-    /// The smallest absolute coefficient that is kept, with the relative threshold taken
-    /// from the sum as it is after a gate.
-    fn threshold<P: Path<Coeff = C>>(&self, terms: &FxHashMap<PauliString<W>, P>) -> f64 {
+    /// Whether a rule reads the counters of the rotations behind a term.
+    pub(crate) fn counts(&self) -> bool {
+        self.truncation.max_freq.is_some() || self.truncation.max_sins.is_some()
+    }
+
+    /// Whether the smallest absolute coefficient that is kept depends on the sum.
+    pub(crate) fn is_relative(&self) -> bool {
+        self.truncation.min_rel_coeff.is_some()
+    }
+
+    /// The smallest absolute coefficient that is kept, where `largest` is the largest
+    /// absolute coefficient of the sum as it is after a gate.
+    pub(crate) fn threshold(&self, largest: impl FnOnce() -> f64) -> f64 {
         let min_abs = self.truncation.min_abs_coeff;
         match self.truncation.min_rel_coeff {
             None => min_abs,
-            Some(min_rel) => {
-                let largest = terms
-                    .values()
-                    .map(|path| path.coeff().abs())
-                    .fold(0.0, f64::max);
-                (min_rel * largest).max(min_abs)
-            }
+            Some(min_rel) => (min_rel * largest()).max(min_abs),
         }
     }
 
     #[inline]
-    fn drops<P: Path<Coeff = C>>(&self, string: &PauliString<W>, path: &P, min_abs: f64) -> bool {
+    pub(crate) fn drops<P: Path<Coeff = C>>(
+        &self,
+        string: &PauliString<W>,
+        path: &P,
+        min_abs: f64,
+    ) -> bool {
         let truncation = self.truncation;
         let coeff = path.coeff();
         if coeff.is_below(min_abs)
@@ -211,217 +255,5 @@ impl<const W: usize, C: Coefficient> Rules<'_, W, C> {
             }
         }
         self.custom.is_some_and(|custom| custom(string, coeff))
-    }
-}
-
-/// Buffers that are reused across gates.
-struct Scratch<const W: usize, P> {
-    /// The next sum under a Clifford gate.
-    spare: FxHashMap<PauliString<W>, P>,
-    /// The new terms under a rotation or amplitude damping.
-    created: Vec<(PauliString<W>, P)>,
-    /// The images under a transfer map, each with the Pauli string it came from.
-    mapped: Vec<(PauliString<W>, PauliString<W>, P)>,
-}
-
-fn run<const W: usize, P: Path>(
-    circuit: &[Gate],
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    rules: &Rules<'_, W, P::Coeff>,
-    picture: Picture,
-) {
-    let mut scratch = Scratch {
-        spare: FxHashMap::default(),
-        created: Vec::new(),
-        mapped: Vec::new(),
-    };
-    match picture {
-        Picture::Heisenberg => {
-            for gate in circuit.iter().rev() {
-                apply(gate, terms, rules, &mut scratch);
-            }
-        }
-        Picture::Schrodinger => {
-            for gate in circuit {
-                apply(&gate.adjoint(), terms, rules, &mut scratch);
-            }
-        }
-    }
-}
-
-/// Applies the action of `gate` on observables to every term, then truncates.
-fn apply<const W: usize, P: Path>(
-    gate: &Gate,
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    rules: &Rules<'_, W, P::Coeff>,
-    scratch: &mut Scratch<W, P>,
-) {
-    match gate {
-        Gate::Rotation { generator, theta } => {
-            apply_rotation(
-                &PauliString::from_ops(generator),
-                *theta,
-                terms,
-                &mut scratch.created,
-            );
-        }
-        Gate::PauliChannel { qubits, factors } => {
-            for (p, path) in terms.iter_mut() {
-                *path = path.scale(factors[Gate::channel_index(qubits, p)]);
-            }
-        }
-        Gate::AmplitudeDamping { qubit, gamma } => {
-            apply_amplitude_damping(*qubit, *gamma, terms, &mut scratch.created);
-        }
-        Gate::TransferMap { qubits, columns } => {
-            apply_transfer_map(qubits, columns, terms, &mut scratch.mapped);
-        }
-        // A Clifford gate is a bijection of the Pauli strings up to signs, which leaves
-        // nothing to drop for a rule that reads only the coefficient.
-        _ => {
-            apply_clifford(gate, terms, rules, &mut scratch.spare);
-            return;
-        }
-    }
-    let min_abs = rules.threshold(terms);
-    terms.retain(|p, path| !rules.drops(p, path, min_abs));
-}
-
-fn apply_clifford<const W: usize, P: Path>(
-    gate: &Gate,
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    rules: &Rules<'_, W, P::Coeff>,
-    spare: &mut FxHashMap<PauliString<W>, P>,
-) {
-    let truncates = rules.reads_string();
-    let min_abs = rules.truncation.min_abs_coeff;
-
-    // A Pauli gate only changes signs.
-    if matches!(gate, Gate::X(_) | Gate::Y(_) | Gate::Z(_)) {
-        for (p, path) in terms.iter_mut() {
-            let mut q = *p;
-            if gate.conjugate_clifford(&mut q) {
-                *path = path.scale(-1.0);
-            }
-        }
-        if truncates {
-            terms.retain(|p, path| !rules.drops(p, path, min_abs));
-        }
-        return;
-    }
-
-    spare.clear();
-    spare.reserve(terms.len());
-    for (mut p, mut path) in terms.drain() {
-        if gate.conjugate_clifford(&mut p) {
-            path = path.scale(-1.0);
-        }
-        if !(truncates && rules.drops(&p, &path, min_abs)) {
-            spare.insert(p, path);
-        }
-    }
-    std::mem::swap(terms, spare);
-}
-
-/// Adds the new terms to the sum, merging each with the term on the same Pauli string.
-fn merge_created<const W: usize, P: Path>(
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    created: &mut Vec<(PauliString<W>, P)>,
-) {
-    for (p, path) in created.drain(..) {
-        match terms.entry(p) {
-            Entry::Occupied(mut entry) => {
-                let merged = entry.get().merge(path);
-                entry.insert(merged);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(path);
-            }
-        }
-    }
-}
-
-/// Applies `P -> U† P U` for `U = exp(-i theta / 2 G)` to every term.
-///
-/// A string that commutes with `G` is unchanged. One that anticommutes becomes
-/// `cos(theta) P + sin(theta) (i G P)`, and `i G P` is a Pauli string up to a sign.
-/// `P -> G P` pairs up the anticommuting strings, so every coefficient is the sum of at
-/// most two numbers and the result does not depend on the order of the terms.
-fn apply_rotation<const W: usize, P: Path>(
-    generator: &PauliString<W>,
-    theta: f64,
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    created: &mut Vec<(PauliString<W>, P)>,
-) {
-    let (sin, cos) = theta.sin_cos();
-    created.clear();
-    for (p, path) in terms.iter_mut() {
-        if !p.commutes(generator) {
-            // G P = i^k P' with k odd, so i G P = i^(k + 1) P' = -P' for k = 1 and +P' for k = 3.
-            let (product, k) = generator.mul(p);
-            debug_assert!(k == 1 || k == 3);
-            let sign = if k == 3 { 1.0 } else { -1.0 };
-            created.push((product, path.sin_branch(sin, sign)));
-            *path = path.cos_branch(cos);
-        }
-    }
-    merge_created(terms, created);
-}
-
-/// Applies the adjoint of amplitude damping on `qubit` to every term.
-///
-/// X and Y on the qubit are multiplied by `sqrt(1 - gamma)`. A string with Z there keeps
-/// `1 - gamma` of its coefficient and adds `gamma` of it to the string with the identity there.
-fn apply_amplitude_damping<const W: usize, P: Path>(
-    qubit: usize,
-    gamma: f64,
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    created: &mut Vec<(PauliString<W>, P)>,
-) {
-    let transverse = (1.0 - gamma).sqrt();
-    created.clear();
-    for (p, path) in terms.iter_mut() {
-        match (p.x_bit(qubit), p.z_bit(qubit)) {
-            (false, false) => {}
-            (false, true) => {
-                let mut without_z = *p;
-                without_z.flip_z(qubit);
-                created.push((without_z, path.scale(gamma)));
-                *path = path.scale(1.0 - gamma);
-            }
-            _ => *path = path.scale(transverse),
-        }
-    }
-    merge_created(terms, created);
-}
-
-/// Replaces every term by its image under a transfer map on `qubits`.
-///
-/// Several terms can contribute to one Pauli string. Their contributions are merged in the
-/// order of the Pauli strings they come from, so that the result does not depend on the
-/// order of the terms.
-fn apply_transfer_map<const W: usize, P: Path>(
-    qubits: &[usize],
-    columns: &[Vec<(usize, f64)>],
-    terms: &mut FxHashMap<PauliString<W>, P>,
-    mapped: &mut Vec<(PauliString<W>, PauliString<W>, P)>,
-) {
-    mapped.clear();
-    for (p, path) in terms.drain() {
-        for &(index, factor) in &columns[Gate::channel_index(qubits, &p)] {
-            mapped.push((Gate::with_index(qubits, p, index), p, path.scale(factor)));
-        }
-    }
-    mapped.sort_unstable_by_key(|&(image, source, _)| (image, source));
-    for (image, _, path) in mapped.drain(..) {
-        match terms.entry(image) {
-            Entry::Occupied(mut entry) => {
-                let merged = entry.get().merge(path);
-                entry.insert(merged);
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(path);
-            }
-        }
     }
 }

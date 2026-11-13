@@ -92,6 +92,20 @@ qubit as the lowest digit.
 `pp.PauliSum(num_qubits, dtype=complex)` holds complex coefficients, for observables that are
 not Hermitian. `astype(float)` and `astype(complex)` convert between the two kinds.
 
+### Threads
+
+A propagation uses the threads of the machine as soon as the sum is large enough to be worth
+dividing among them. `threads` sets their number:
+
+```python
+evolved = pp.propagate(circuit, observable, max_weight=6, threads=8)
+```
+
+The result does not depend on it: every coefficient comes out bit for bit the same on any
+number of threads. On a processor with performance and efficiency cores, the number of
+performance cores is usually the fastest choice, because the threads work through each gate
+together and wait for the slowest of them.
+
 ## What is supported
 
 - Gates: H, X, Y, Z, S, SX, T and their adjoints, CX, CY, CZ, SWAP, CCX (as Clifford + T), RX,
@@ -126,6 +140,25 @@ not Hermitian. `astype(float)` and `astype(complex)` convert between the two kin
 Truncated results are approximations. Nothing here bounds their error; check convergence by
 tightening the truncation.
 
+## How it works
+
+The terms of the sum are kept in arrays, in the order of their Pauli strings. A rotation
+changes the coefficients of the terms it acts on in place and creates one more term from
+each, with some bits of the Pauli string flipped, the same bits for all of them. The created
+terms are put in order by regrouping them by those bits, which is cheaper than sorting them,
+and one merge of the two ordered sequences adds up the terms that have the same Pauli string
+and drops the truncated ones. This is the vector backend of PauliPropagation.jl. A gate that
+cannot change any term of the sum, because no term has an operator where it acts, is skipped.
+
+For several threads the sum is divided into zones, by whether a Pauli string commutes with
+each of a few fixed Pauli strings. Flipping the same bits in every string of a zone moves all
+of them to one other zone, so under a rotation the zones pair up and every pair is worked on
+by one thread without looking at the others. Every coefficient is computed by the same
+operations in the same order however the sum is divided.
+
+In Rust, `pauliprop::propagate_in_zones` takes the size and the largest number of the zones,
+and `pauliprop::reference` is a second, simple propagation on a hash map.
+
 ### Qubit numbering in QIR
 
 Observables refer to the qubits of the QIR program. These are the qubits of the Q# register in
@@ -139,9 +172,13 @@ measurement the QIR qubits no longer number the Q# register.
 uv venv --python 3.12 .venv && source .venv/bin/activate
 uv pip install maturin pytest numpy qdk
 maturin develop --release
-cargo test          # gate and noise rules against dense matrices
+cargo test          # against dense matrices, and the engine against the hash-map propagation
 pytest              # against the QDK simulators, numpy and PauliPropagation.jl
 ```
+
+Both suites cap their own memory, at a few times what they need: a propagation that fails to
+truncate grows without end, and a test run that does is ended rather than left to exhaust the
+machine (`crates/core/tests/common/memory.rs`, `tests/conftest.py`).
 
 `tests/reference` holds results, circuits and gate tables from PauliPropagation.jl. To
 regenerate them, with a clone of that package in `~/dev/PauliPropagation.jl`:
@@ -151,9 +188,31 @@ julia --project=tools/julia -e 'using Pkg; Pkg.develop(path=joinpath(homedir(), 
 julia --project=tools/julia tools/julia/generate_reference.jl
 ```
 
+## Benchmarks
+
+`tools/julia/benchmark.jl` times PauliPropagation.jl on four circuits and writes them to
+`benchmarks/cases`; `benchmarks/run.py` times this package on the same files and checks that
+the number of terms and the expectation value agree:
+
+```bash
+julia -t 8 --project=tools/julia tools/julia/benchmark.jl
+python benchmarks/run.py --threads 1,8
+```
+
+Best of three runs on an Apple M4 Pro, which has eight performance cores, against the fastest
+configuration of PauliPropagation.jl 0.9.2 for the number of threads:
+
+| Case | Terms | 1 thread | Julia, 1 thread | 8 threads | Julia, 8 threads |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 1.5 ms | 1.6 ms | 1.5 ms | 1.9 ms |
+| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 49 ms | 57 ms | 19 ms | 20 ms |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.66 s | 0.65 s | 0.11 s | 0.12 s |
+| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 17.5 s | 17.6 s | 3.4 s | 3.6 s |
+
 ## Verification
 
-Every rule is checked against a reference that shares no code with the engine:
+Every rule is checked against references that share no code with the engine, and the engine
+as a whole against a second implementation of the same rules:
 
 1. **Dense matrices** (`crates/core/tests`). Every Clifford gate and every one of the 63 Pauli
    rotations on three qubits is checked on all 64 Pauli strings against `U† P U` computed by
@@ -178,6 +237,12 @@ Every rule is checked against a reference that shares no code with the engine:
    files run through this package's API, with its Clifford tables and circuit builders as
    data. Where the Julia package compares its backends with each other, the engine is
    compared with a propagation on labels written in Python.
+6. **A second engine** (`crates/core/tests/engines_agree.rs`, `tests/test_threads.py`).
+   `pauliprop::reference` propagates on a hash map and shares only the truncation rules with
+   the engine. The two must agree on every term and on every bit of every coefficient: on
+   random circuits of all gates, under every truncation, as observables and as states, on
+   registers of several machine words, on wide registers that the sum does not fill, however
+   the engine divides the sum and on any number of threads.
 
 ## Attribution
 

@@ -11,9 +11,11 @@
 //! follow PauliPropagation.jl, <https://github.com/SparqleSim/PauliPropagation.jl>.
 
 mod coeff;
+mod engine;
 mod gate;
 mod pauli;
 mod propagate;
+pub mod reference;
 mod sum;
 
 pub use coeff::Coefficient;
@@ -21,6 +23,7 @@ pub use gate::Gate;
 pub use num_complex::Complex64;
 pub use pauli::{PauliOp, PauliString};
 pub use propagate::{
-    propagate, propagate_with, CustomTruncation, Error, Picture, Truncation, WeightDamping,
+    propagate, propagate_in_zones, propagate_with, CustomTruncation, Error, Picture, Truncation,
+    WeightDamping, Zones,
 };
 pub use sum::PauliSum;

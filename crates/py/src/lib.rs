@@ -4,10 +4,10 @@ use pauliprop::{
     Coefficient, Complex64, CustomTruncation, Gate, PauliOp, PauliString, PauliSum as CoreSum,
     Picture, Truncation, WeightDamping,
 };
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyFloat, PyType};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 fn value_error(err: impl std::fmt::Display) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -602,6 +602,25 @@ impl Circuit {
 
 /// Propagates `sum` through the gates, asking `callback(label, coefficient)` about every
 /// term after every gate if there is one.
+/// The pool of `threads` threads, which is made when it is first asked for and kept.
+fn pool_of(threads: usize) -> PyResult<Arc<rayon::ThreadPool>> {
+    static POOLS: Mutex<Vec<(usize, Arc<rayon::ThreadPool>)>> = Mutex::new(Vec::new());
+    if threads == 0 {
+        return Err(value_error("threads must be at least 1"));
+    }
+    let mut pools = POOLS.lock().expect("the lock is not poisoned");
+    if let Some((_, pool)) = pools.iter().find(|(size, _)| *size == threads) {
+        return Ok(Arc::clone(pool));
+    }
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+    let pool = Arc::new(pool);
+    pools.push((threads, Arc::clone(&pool)));
+    Ok(pool)
+}
+
 fn run<const W: usize, C: Scalar>(
     py: Python<'_>,
     gates: &[Gate],
@@ -609,6 +628,7 @@ fn run<const W: usize, C: Scalar>(
     truncation: &Truncation,
     picture: Picture,
     callback: Option<&Py<PyAny>>,
+    pool: Option<&rayon::ThreadPool>,
 ) -> PyResult<()> {
     let num_qubits = sum.num_qubits();
     let failure: Mutex<Option<PyErr>> = Mutex::new(None);
@@ -633,8 +653,12 @@ fn run<const W: usize, C: Scalar>(
     };
     let custom: Option<&CustomTruncation<'_, W, C>> = callback.is_some().then_some(&ask);
 
-    py.allow_threads(|| pauliprop::propagate_with(gates, sum, truncation, picture, custom))
-        .map_err(value_error)?;
+    let mut propagate = || pauliprop::propagate_with(gates, sum, truncation, picture, custom);
+    py.allow_threads(|| match pool {
+        Some(pool) => pool.install(propagate),
+        None => propagate(),
+    })
+    .map_err(value_error)?;
     match failure.into_inner().expect("the lock is not poisoned") {
         Some(err) => Err(err),
         None => Ok(()),
@@ -659,6 +683,9 @@ fn run<const W: usize, C: Scalar>(
 ///
 /// A Clifford gate changes no coefficient but its sign, so after one only `max_weight`,
 /// `weight_damping` and `custom_truncation` can drop a term.
+///
+/// `threads` is the number of threads to use, by default one per processor. The result does
+/// not depend on it.
 #[pyfunction]
 #[pyo3(signature = (
     circuit,
@@ -672,6 +699,7 @@ fn run<const W: usize, C: Scalar>(
     weight_damping=None,
     custom_truncation=None,
     heisenberg=true,
+    threads=None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn propagate(
@@ -686,6 +714,7 @@ fn propagate(
     weight_damping: Option<(f64, f64)>,
     custom_truncation: Option<Py<PyAny>>,
     heisenberg: bool,
+    threads: Option<usize>,
 ) -> PyResult<PauliSum> {
     if circuit.num_qubits > observable.num_qubits() {
         return Err(value_error(format!(
@@ -732,7 +761,9 @@ fn propagate(
     let mut result = observable.clone();
     let gates = &circuit.gates;
     let callback = custom_truncation.as_ref();
-    dispatch!(&mut result.inner, s => run(py, gates, s, &truncation, picture, callback))?;
+    let pool = threads.map(pool_of).transpose()?;
+    let pool = pool.as_deref();
+    dispatch!(&mut result.inner, s => run(py, gates, s, &truncation, picture, callback, pool))?;
     Ok(result)
 }
 

@@ -34,11 +34,12 @@ def expectation(
     max_sins: int | None = None,
     weight_damping: tuple[float, float] | None = None,
     custom_truncation: Callable[[str, float | complex], bool] | None = None,
+    threads: int | None = None,
 ) -> float | complex:
     """The expectation value of ``observable`` after ``circuit`` acts on the all-zero state.
 
     The result is exact only if the truncations drop nothing; see :func:`propagate` for
-    what each of them drops.
+    what each of them drops, and for ``threads``.
     """
     evolved = propagate(
         circuit,
@@ -50,5 +51,6 @@ def expectation(
         max_sins=max_sins,
         weight_damping=weight_damping,
         custom_truncation=custom_truncation,
+        threads=threads,
     )
     return evolved.overlap_with_zero()

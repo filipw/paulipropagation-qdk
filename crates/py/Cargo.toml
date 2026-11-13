@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pauliprop = { path = "../core" }
+rayon = "1"
 pyo3 = { version = "0.25", features = ["extension-module", "abi3-py310", "num-complex"] }
