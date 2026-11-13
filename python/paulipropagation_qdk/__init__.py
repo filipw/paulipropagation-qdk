@@ -17,10 +17,32 @@ which gives expectation values without holding a quantum state::
 
 from collections.abc import Callable
 
-from ._native import Circuit, PauliSum, propagate
+from ._native import (
+    Circuit,
+    PauliSum,
+    Surrogate,
+    estimate_mse,
+    gradient,
+    mcpropagate,
+    mcsample,
+    propagate,
+    resample,
+)
 from ._qir import circuit_from_qir
 
-__all__ = ["Circuit", "PauliSum", "circuit_from_qir", "expectation", "propagate"]
+__all__ = [
+    "Circuit",
+    "PauliSum",
+    "Surrogate",
+    "circuit_from_qir",
+    "estimate_mse",
+    "expectation",
+    "gradient",
+    "mcpropagate",
+    "mcsample",
+    "propagate",
+    "resample",
+]
 
 
 def expectation(

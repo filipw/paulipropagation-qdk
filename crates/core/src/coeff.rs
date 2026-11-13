@@ -27,6 +27,13 @@ pub trait Coefficient: Copy + Debug + PartialEq + Send + Sync + 'static {
 
     fn norm_sqr(self) -> f64;
 
+    fn to_complex(self) -> Complex64;
+
+    /// The number with the given absolute value and the sign or phase of this one, which
+    /// must not be zero.
+    #[must_use]
+    fn with_abs(self, abs: f64) -> Self;
+
     /// Whether the absolute value is below `threshold`.
     fn is_below(self, threshold: f64) -> bool;
 }
@@ -62,6 +69,16 @@ impl Coefficient for f64 {
     #[inline]
     fn norm_sqr(self) -> f64 {
         self * self
+    }
+
+    #[inline]
+    fn to_complex(self) -> Complex64 {
+        Complex64::new(self, 0.0)
+    }
+
+    #[inline]
+    fn with_abs(self, abs: f64) -> Self {
+        abs.copysign(self)
     }
 
     #[inline]
@@ -101,6 +118,16 @@ impl Coefficient for Complex64 {
     #[inline]
     fn norm_sqr(self) -> f64 {
         Complex64::norm_sqr(&self)
+    }
+
+    #[inline]
+    fn to_complex(self) -> Complex64 {
+        self
+    }
+
+    #[inline]
+    fn with_abs(self, abs: f64) -> Self {
+        self * (abs / self.norm())
     }
 
     /// Compares the squares, as PauliPropagation.jl does for complex coefficients.

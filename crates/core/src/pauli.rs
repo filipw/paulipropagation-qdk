@@ -305,6 +305,36 @@ impl<const W: usize> PauliString<W> {
         })
     }
 
+    /// Compares two strings by the operators on the highest qubit where they differ, with
+    /// `I < X < Y < Z`. This is the order of the integers that PauliPropagation.jl holds
+    /// Pauli strings in.
+    #[must_use]
+    pub fn cmp_from_highest_qubit(&self, other: &Self) -> std::cmp::Ordering {
+        for i in (0..W).rev() {
+            let differing = (self.x[i] ^ other.x[i]) | (self.z[i] ^ other.z[i]);
+            if differing != 0 {
+                let q = 64 * i + 63 - differing.leading_zeros() as usize;
+                return self.get(q).cmp(&other.get(q));
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+
+    /// The qubits with a non-identity operator, in ascending order, and their operators.
+    #[must_use]
+    pub fn ops(&self) -> Vec<(usize, PauliOp)> {
+        let mut ops = Vec::with_capacity(self.weight() as usize);
+        for i in 0..W {
+            let mut word = self.x[i] | self.z[i];
+            while word != 0 {
+                let q = 64 * i + word.trailing_zeros() as usize;
+                ops.push((q, self.get(q)));
+                word &= word - 1;
+            }
+        }
+        ops
+    }
+
     /// The operators on qubits `0..num_qubits` as a string of `I`, `X`, `Y`, `Z`, qubit 0 first.
     #[must_use]
     pub fn label(&self, num_qubits: usize) -> String {

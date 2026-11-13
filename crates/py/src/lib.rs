@@ -7,6 +7,7 @@ use pauliprop::{
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyComplex, PyFloat, PyType};
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 fn value_error(err: impl std::fmt::Display) -> PyErr {
@@ -143,6 +144,73 @@ macro_rules! dispatch {
     };
 }
 
+/// Evaluates the body for two sums of the same kind, and gives `None` for two of different kinds.
+macro_rules! pairwise {
+    ($a:expr, $b:expr, $x:ident, $y:ident => $body:expr) => {
+        match ($a, $b) {
+            (AnySum::R1($x), AnySum::R1($y)) => Some($body),
+            (AnySum::R2($x), AnySum::R2($y)) => Some($body),
+            (AnySum::R4($x), AnySum::R4($y)) => Some($body),
+            (AnySum::R8($x), AnySum::R8($y)) => Some($body),
+            (AnySum::C1($x), AnySum::C1($y)) => Some($body),
+            (AnySum::C2($x), AnySum::C2($y)) => Some($body),
+            (AnySum::C4($x), AnySum::C4($y)) => Some($body),
+            (AnySum::C8($x), AnySum::C8($y)) => Some($body),
+            _ => None,
+        }
+    };
+}
+
+/// Evaluates the body for a sum with real coefficients, and returns an error for a complex one.
+macro_rules! dispatch_real {
+    ($sum:expr, $s:ident => $body:expr) => {
+        match $sum {
+            AnySum::R1($s) => $body,
+            AnySum::R2($s) => $body,
+            AnySum::R4($s) => $body,
+            AnySum::R8($s) => $body,
+            _ => return Err(value_error("this takes a sum with real coefficients")),
+        }
+    };
+}
+
+/// A sum of one width and kind of coefficient as the sum of any.
+trait Wrap {
+    fn wrap(self) -> AnySum;
+}
+
+/// The sum with real coefficients and strings of `W` words, if it is one.
+trait AsReal<const W: usize> {
+    fn as_real(&self) -> Option<&CoreSum<W>>;
+}
+
+macro_rules! kinds {
+    ($(($real:ident, $complex:ident, $width:literal)),*) => {$(
+        impl Wrap for CoreSum<$width> {
+            fn wrap(self) -> AnySum {
+                AnySum::$real(self)
+            }
+        }
+        impl Wrap for CoreSum<$width, Complex64> {
+            fn wrap(self) -> AnySum {
+                AnySum::$complex(self)
+            }
+        }
+        impl AsReal<$width> for AnySum {
+            fn as_real(&self) -> Option<&CoreSum<$width>> {
+                match self {
+                    AnySum::$real(sum) => Some(sum),
+                    _ => None,
+                }
+            }
+        }
+    )*};
+}
+kinds!((R1, C1, 1), (R2, C2, 2), (R4, C4, 4), (R8, C8, 8));
+
+// After the macros, which it uses.
+mod extras;
+
 fn complex_copy<const W: usize>(sum: &CoreSum<W>) -> CoreSum<W, Complex64> {
     let mut copy = CoreSum::new(sum.num_qubits()).expect("the width fits the same qubits");
     for (string, coeff) in sum.iter() {
@@ -227,18 +295,26 @@ impl AnySum {
 
     /// The scalar product of two sums with the same kind of coefficients.
     fn scalar_product(&self, other: &AnySum) -> Option<Number> {
-        macro_rules! same {
-            ($($variant:ident),*) => {
-                match (self, other) {
-                    $((AnySum::$variant(a), AnySum::$variant(b)) => {
-                        (a.num_qubits() == b.num_qubits()).then(|| a.scalar_product(b).number())
-                    })*
-                    _ => None,
-                }
-            };
-        }
-        same!(R1, R2, R4, R8, C1, C2, C4, C8)
+        pairwise!(self, other, a, b => {
+            if a.num_qubits() != b.num_qubits() {
+                return None;
+            }
+            a.scalar_product(b).number()
+        })
     }
+
+    /// The two sums with the same kind of coefficients: complex if one of them is.
+    fn alike(&self, other: &AnySum) -> (AnySum, AnySum) {
+        if self.is_complex() || other.is_complex() {
+            (self.to_complex(), other.to_complex())
+        } else {
+            (self.clone(), other.clone())
+        }
+    }
+}
+
+fn different_registers() -> PyErr {
+    value_error("the two sums are on different numbers of qubits")
 }
 
 /// A sum of Pauli strings: an observable, or a state written in the Pauli basis.
@@ -385,6 +461,111 @@ impl PauliSum {
             self.inner.to_real()?
         };
         Ok(Self { inner })
+    }
+
+    /// `self + factor * other`, complex if one of the two is.
+    fn plus(&self, other: &PauliSum, factor: f64) -> PyResult<Self> {
+        let (mut total, other) = self.inner.alike(&other.inner);
+        let added = pairwise!(&mut total, &other, a, b => {
+            a.add_scaled(b, Coefficient::from_real(factor))
+        });
+        added
+            .ok_or_else(different_registers)?
+            .map_err(value_error)?;
+        Ok(Self { inner: total })
+    }
+
+    fn __add__(&self, other: &PauliSum) -> PyResult<Self> {
+        self.plus(other, 1.0)
+    }
+
+    fn __sub__(&self, other: &PauliSum) -> PyResult<Self> {
+        self.plus(other, -1.0)
+    }
+
+    fn __neg__(&self) -> PyResult<Self> {
+        self.__mul__(Number::Real(-1.0))
+    }
+
+    /// The sum with every coefficient multiplied by a number.
+    fn __mul__(&self, factor: Number) -> PyResult<Self> {
+        let mut inner = match factor {
+            Number::Complex(_) => self.inner.to_complex(),
+            Number::Real(_) => self.inner.clone(),
+        };
+        dispatch!(&mut inner, s => s.scale(Scalar::from_number(factor)?));
+        Ok(Self { inner })
+    }
+
+    fn __rmul__(&self, factor: Number) -> PyResult<Self> {
+        self.__mul__(factor)
+    }
+
+    /// The operator product `self * other`, with complex coefficients.
+    fn product(&self, other: &PauliSum) -> PyResult<Self> {
+        let (a, b) = self.inner.alike(&other.inner);
+        let product = pairwise!(&a, &b, a, b => a.product(b).map(Wrap::wrap));
+        let inner = product
+            .ok_or_else(different_registers)?
+            .map_err(value_error)?;
+        Ok(Self { inner })
+    }
+
+    /// The commutator `self * other - other * self`, with complex coefficients.
+    fn commutator(&self, other: &PauliSum) -> PyResult<Self> {
+        let (a, b) = self.inner.alike(&other.inner);
+        let commutator = pairwise!(&a, &b, a, b => a.commutator(b).map(Wrap::wrap));
+        let inner = commutator
+            .ok_or_else(different_registers)?
+            .map_err(value_error)?;
+        Ok(Self { inner })
+    }
+
+    /// The sum with the Pauli strings that are translations of each other merged into one
+    /// of them, the one with its operators on the lowest qubits.
+    ///
+    /// Without arguments the qubits are a ring. With `nx` and `ny` they are a torus of `nx`
+    /// columns and `ny` rows, on which the qubit in column `x` of row `y` is `y * nx + x`.
+    /// Where the circuit and the state are the same after a translation, the merged sum has
+    /// the expectation value of the sum it was made from.
+    #[pyo3(signature = (nx=None, ny=None))]
+    fn translation_merge(&self, nx: Option<usize>, ny: Option<usize>) -> PyResult<Self> {
+        let mut merged = self.clone();
+        match (nx, ny) {
+            (None, None) => dispatch!(&mut merged.inner, s => s.translation_merge()),
+            (Some(nx), Some(ny)) => {
+                dispatch!(&mut merged.inner, s => s.translation_merge_on_grid(nx, ny))
+                    .map_err(value_error)?;
+            }
+            _ => return Err(value_error("a grid needs both nx and ny")),
+        }
+        Ok(merged)
+    }
+
+    /// The sum with every Pauli string replaced by `representative(label)`, and the terms
+    /// that have become equal added up. `label[q]` is the operator on qubit `q`.
+    fn symmetry_merge(&self, representative: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let num_qubits = self.num_qubits();
+        let qubits: Vec<usize> = (0..num_qubits).collect();
+        let failure = RefCell::new(None);
+        let mut merged = self.clone();
+        dispatch!(&mut merged.inner, s => s.merge_by(|string| {
+            let image = representative
+                .call1((string.label(num_qubits),))
+                .and_then(|label| label.extract::<String>())
+                .and_then(|label| parse_ops(&label, &qubits));
+            match image {
+                Ok(ops) => PauliString::from_ops(&ops),
+                Err(err) => {
+                    failure.borrow_mut().get_or_insert(err);
+                    *string
+                }
+            }
+        }));
+        match failure.into_inner() {
+            Some(err) => Err(err),
+            None => Ok(merged),
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -591,6 +772,40 @@ impl Circuit {
         self.push(Gate::transfer_map(&qubits, &flat).map_err(value_error)?)
     }
 
+    /// The angles of the rotations, in the order of the circuit. T gates are rotations.
+    #[getter]
+    fn angles(&self) -> Vec<f64> {
+        let rotations = self.gates.iter().filter_map(|gate| match gate {
+            Gate::Rotation { theta, .. } => Some(*theta),
+            _ => None,
+        });
+        rotations.collect()
+    }
+
+    /// The circuit with the angles of its rotations replaced by `angles`, one for every
+    /// rotation in the order of the circuit.
+    fn with_angles(&self, angles: Vec<f64>) -> PyResult<Self> {
+        if angles.len() != self.num_rotations() {
+            return Err(value_error(format!(
+                "{} angles were given for {} rotations",
+                angles.len(),
+                self.num_rotations()
+            )));
+        }
+        let mut circuit = Self::new(self.num_qubits);
+        let mut angles = angles.into_iter();
+        for gate in &self.gates {
+            circuit.push(match gate {
+                Gate::Rotation { generator, .. } => Gate::Rotation {
+                    generator: generator.clone(),
+                    theta: angles.next().expect("one for every rotation"),
+                },
+                other => other.clone(),
+            })?;
+        }
+        Ok(circuit)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Circuit(num_qubits={}, gates={})",
@@ -600,8 +815,6 @@ impl Circuit {
     }
 }
 
-/// Propagates `sum` through the gates, asking `callback(label, coefficient)` about every
-/// term after every gate if there is one.
 /// The pool of `threads` threads, which is made when it is first asked for and kept.
 fn pool_of(threads: usize) -> PyResult<Arc<rayon::ThreadPool>> {
     static POOLS: Mutex<Vec<(usize, Arc<rayon::ThreadPool>)>> = Mutex::new(Vec::new());
@@ -621,14 +834,18 @@ fn pool_of(threads: usize) -> PyResult<Arc<rayon::ThreadPool>> {
     Ok(pool)
 }
 
+/// Runs `propagate` on `sum` with the threads of `pool`, handing it a rule that asks
+/// `callback(label, coefficient)` about a term if there is a callback.
 fn run<const W: usize, C: Scalar>(
     py: Python<'_>,
-    gates: &[Gate],
     sum: &mut CoreSum<W, C>,
-    truncation: &Truncation,
-    picture: Picture,
     callback: Option<&Py<PyAny>>,
     pool: Option<&rayon::ThreadPool>,
+    propagate: impl FnOnce(
+            &mut CoreSum<W, C>,
+            Option<&CustomTruncation<'_, W, C>>,
+        ) -> Result<(), pauliprop::Error>
+        + Send,
 ) -> PyResult<()> {
     let num_qubits = sum.num_qubits();
     let failure: Mutex<Option<PyErr>> = Mutex::new(None);
@@ -653,10 +870,9 @@ fn run<const W: usize, C: Scalar>(
     };
     let custom: Option<&CustomTruncation<'_, W, C>> = callback.is_some().then_some(&ask);
 
-    let mut propagate = || pauliprop::propagate_with(gates, sum, truncation, picture, custom);
     py.allow_threads(|| match pool {
-        Some(pool) => pool.install(propagate),
-        None => propagate(),
+        Some(pool) => pool.install(|| propagate(sum, custom)),
+        None => propagate(sum, custom),
     })
     .map_err(value_error)?;
     match failure.into_inner().expect("the lock is not poisoned") {
@@ -716,13 +932,58 @@ fn propagate(
     heisenberg: bool,
     threads: Option<usize>,
 ) -> PyResult<PauliSum> {
-    if circuit.num_qubits > observable.num_qubits() {
+    check_register(circuit, observable)?;
+    let truncation = truncation_of(
+        max_weight,
+        min_abs_coeff,
+        min_rel_coeff,
+        max_freq,
+        max_sins,
+        weight_damping,
+    )?;
+    check_callable(py, custom_truncation.as_ref())?;
+    let picture = picture_of(heisenberg);
+
+    let mut result = observable.clone();
+    let gates = &circuit.gates;
+    let callback = custom_truncation.as_ref();
+    let pool = threads.map(pool_of).transpose()?;
+    let pool = pool.as_deref();
+    dispatch!(&mut result.inner, s => run(py, s, callback, pool, |sum, custom| {
+        pauliprop::propagate_with(gates, sum, &truncation, picture, custom)
+    }))?;
+    Ok(result)
+}
+
+fn check_register(circuit: &Circuit, sum: &PauliSum) -> PyResult<()> {
+    if circuit.num_qubits > sum.num_qubits() {
         return Err(value_error(format!(
             "the circuit has {} qubits but the observable has {}",
             circuit.num_qubits,
-            observable.num_qubits()
+            sum.num_qubits()
         )));
     }
+    Ok(())
+}
+
+fn check_callable(py: Python<'_>, callback: Option<&Py<PyAny>>) -> PyResult<()> {
+    match callback {
+        Some(callback) if !callback.bind(py).is_callable() => {
+            Err(PyTypeError::new_err("custom_truncation must be callable"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The truncation with the given options, after checking that they are thresholds.
+fn truncation_of(
+    max_weight: Option<u32>,
+    min_abs_coeff: f64,
+    min_rel_coeff: Option<f64>,
+    max_freq: Option<u32>,
+    max_sins: Option<u32>,
+    weight_damping: Option<(f64, f64)>,
+) -> PyResult<Truncation> {
     let not_a_threshold = |value: f64| value.is_nan() || value < 0.0;
     if not_a_threshold(min_abs_coeff) {
         return Err(value_error("min_abs_coeff must be zero or positive"));
@@ -736,12 +997,7 @@ fn propagate(
             "weight_damping takes a damping rate and a threshold that is zero or positive",
         ));
     }
-    if let Some(callback) = &custom_truncation {
-        if !callback.bind(py).is_callable() {
-            return Err(PyTypeError::new_err("custom_truncation must be callable"));
-        }
-    }
-    let truncation = Truncation {
+    Ok(Truncation {
         max_weight,
         min_abs_coeff,
         min_rel_coeff,
@@ -751,20 +1007,15 @@ fn propagate(
             gamma,
             min_abs_coeff,
         }),
-    };
-    let picture = if heisenberg {
+    })
+}
+
+fn picture_of(heisenberg: bool) -> Picture {
+    if heisenberg {
         Picture::Heisenberg
     } else {
         Picture::Schrodinger
-    };
-
-    let mut result = observable.clone();
-    let gates = &circuit.gates;
-    let callback = custom_truncation.as_ref();
-    let pool = threads.map(pool_of).transpose()?;
-    let pool = pool.as_deref();
-    dispatch!(&mut result.inner, s => run(py, gates, s, &truncation, picture, callback, pool))?;
-    Ok(result)
+    }
 }
 
 #[pymodule]
@@ -772,5 +1023,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PauliSum>()?;
     m.add_class::<Circuit>()?;
     m.add_function(wrap_pyfunction!(propagate, m)?)?;
+    extras::register(m)?;
     Ok(())
 }

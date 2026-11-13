@@ -6,12 +6,22 @@ use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
-    QubitOutOfRange { qubit: usize, num_qubits: usize },
-    DuplicateQubit { qubit: usize },
-    TooManyQubits { num_qubits: usize, capacity: usize },
+    QubitOutOfRange {
+        qubit: usize,
+        num_qubits: usize,
+    },
+    DuplicateQubit {
+        qubit: usize,
+    },
+    TooManyQubits {
+        num_qubits: usize,
+        capacity: usize,
+    },
     NonFiniteAngle,
     InvalidNoise(&'static str),
     InvalidMatrix(&'static str),
+    /// A request that cannot be met, with the reason.
+    Invalid(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -29,7 +39,9 @@ impl fmt::Display for Error {
                 "{num_qubits} qubits do not fit a Pauli string of {capacity} qubits"
             ),
             Error::NonFiniteAngle => write!(f, "a rotation angle is not finite"),
-            Error::InvalidNoise(what) | Error::InvalidMatrix(what) => write!(f, "{what}"),
+            Error::InvalidNoise(what) | Error::InvalidMatrix(what) | Error::Invalid(what) => {
+                write!(f, "{what}")
+            }
         }
     }
 }
@@ -164,6 +176,15 @@ impl Default for Zones {
             max: if threads == 1 { 1 } else { 8 * threads },
         }
     }
+}
+
+impl Zones {
+    /// A single zone, which is the whole sum on the thread of the caller. It is the fastest
+    /// choice for one gate at a time: dividing a sum into zones costs more than a gate does.
+    pub const ONE: Self = Self {
+        terms: 1024,
+        max: 1,
+    };
 }
 
 /// [`propagate_with`] with the zones chosen by the caller.

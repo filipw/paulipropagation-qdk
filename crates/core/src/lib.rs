@@ -10,16 +10,25 @@
 //! The semantics (rotation convention, gate order, when truncation happens, defaults)
 //! follow PauliPropagation.jl, <https://github.com/SparqleSim/PauliPropagation.jl>.
 
+mod algebra;
 mod coeff;
 mod engine;
 mod gate;
+mod gradient;
+mod montecarlo;
 mod pauli;
 mod propagate;
 pub mod reference;
 mod sum;
+mod surrogate;
 
 pub use coeff::Coefficient;
 pub use gate::Gate;
+pub use gradient::{gradient, State};
+pub use montecarlo::{
+    estimate_mse, propagate_resampling, resample, sample_paths, sample_sum, PathLimits, Resampling,
+    Rng,
+};
 pub use num_complex::Complex64;
 pub use pauli::{PauliOp, PauliString};
 pub use propagate::{
@@ -27,3 +36,4 @@ pub use propagate::{
     WeightDamping, Zones,
 };
 pub use sum::PauliSum;
+pub use surrogate::Surrogate;

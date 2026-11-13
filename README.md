@@ -92,6 +92,98 @@ qubit as the lowest digit.
 `pp.PauliSum(num_qubits, dtype=complex)` holds complex coefficients, for observables that are
 not Hermitian. `astype(float)` and `astype(complex)` convert between the two kinds.
 
+### Arithmetic
+
+Pauli sums on the same qubits are added, subtracted and multiplied by numbers with the usual
+operators. `a.product(b)` is the operator product and `a.commutator(b)` is `ab - ba`, both
+with complex coefficients:
+
+```python
+hamiltonian = 0.5 * zz + 0.3 * x
+derivative = 1j * hamiltonian.commutator(observable)    # dO/dt in the Heisenberg picture
+```
+
+### Symmetries
+
+Where the circuit and the state do not change under a translation of the qubits, Pauli strings
+that are translations of each other have the same expectation value, and they can be merged
+into one term. `translation_merge()` does this for a ring of qubits and
+`translation_merge(nx, ny)` for a torus of `nx` columns and `ny` rows, on which the qubit in
+column `x` of row `y` is `y * nx + x`. The merged sum has the expectation value of the sum
+it was made from, with far fewer terms; merging between the layers of a circuit keeps the
+sum small all the way:
+
+```python
+for _ in range(layers):
+    observable = pp.propagate(layer, observable, max_weight=6).translation_merge()
+```
+
+`symmetry_merge(representative)` merges by any other symmetry: `representative` takes the
+label of a Pauli string and returns the label that stands for all its images.
+
+### Gradients
+
+`pp.gradient` returns an expectation value and its derivatives with respect to the angles of
+all rotations. It takes one pass back through the circuit and one pass forward, where the
+parameter-shift rule takes two propagations for every angle:
+
+```python
+value, derivatives = pp.gradient(circuit, observable, max_weight=6, min_abs_coeff=1e-6)
+```
+
+`derivatives[k]` belongs to the `k`-th rotation of the circuit, the one with the angle
+`circuit.angles[k]`; a T gate is a rotation. `circuit.with_angles(angles)` is the circuit
+with other angles. Without truncation the gradient is exact, and with truncation it is
+close to the gradient of the truncated expectation value. `state` selects the state, as for
+overlaps: `'zero'`, `'plus'`, `'mixed'`, the list of the qubits that are 1, or a Pauli sum.
+
+### Surrogates
+
+Which Pauli strings a propagation reaches does not depend on the angles of the rotations,
+and neither does a truncation by `max_weight`, `max_freq` or `max_sins`. A `Surrogate`
+propagates once for all angles and records how every coefficient is made of sines and
+cosines. Evaluating it at given angles returns the same sum as `propagate` with those angles
+and `min_abs_coeff=0`, bit for bit, without propagating again:
+
+```python
+surrogate = pp.Surrogate(circuit, observable, max_weight=5, max_freq=30)
+for angles in candidates:
+    value = surrogate.evaluate(angles).overlap_with_zero()
+```
+
+### Sampling
+
+A sum that grows beyond what truncation can hold can be thinned at random instead.
+`pp.resample(sum, target_size)` drops terms at random and makes the others larger so that the
+sum is unchanged on average, and `pp.mcpropagate` propagates and resamples whenever a gate
+leaves more than `max_size` terms. The sum then never holds more than twice `max_size` terms,
+and the result is the propagated sum on average:
+
+```python
+estimate = pp.mcpropagate(circuit, observable, max_size=100_000, seed=1)
+```
+
+The resampling methods are those of PauliPropagation.jl: `'semideterministic'` (the default,
+which keeps the largest terms as they are), `'systematic'` and `'multinomial'`.
+`pp.mcsample(circuit, sum, samples)` follows single random paths instead, one branch at every
+rotation, and returns the average of `samples` of them per term. A `seed` makes any of these
+reproducible.
+
+### The error of a truncation
+
+`pp.estimate_mse` estimates the mean squared error that `max_weight`, `max_freq`, `max_sins`
+or a rule on the Pauli string make in an expectation value, from random paths and without
+propagating:
+
+```python
+mse = pp.estimate_mse(circuit, observable, 100_000, max_weight=6)            # any angles
+mse = pp.estimate_mse(circuit, observable, 100_000, thetas=0.3, max_weight=6)  # angles up to 0.3
+```
+
+The average is over the angles of the rotations, each drawn uniformly from `[-thetas, thetas]`
+whatever angle the circuit gives it, so it tells how a truncation does on circuits of this
+shape rather than on this circuit. The observable is a single Pauli string.
+
 ### Threads
 
 A propagation uses the threads of the machine as soon as the sum is large enough to be worth
@@ -133,12 +225,21 @@ together and wait for the slowest of them.
   the Pauli string (`max_weight`, `weight_damping`, `custom_truncation`) drop anything.
 - Expectation values in the all-zero state, the all-plus state, any computational basis
   state, the maximally mixed state, and a state given as a Pauli sum.
+- Sums, products and commutators of Pauli sums, and merging of the Pauli strings that a
+  translation on a ring or a torus, or any symmetry given as a function, maps to each other.
+- Gradients with respect to the angles of all rotations in one backward and one forward pass,
+  for circuits without noise.
+- Surrogates that are evaluated for new angles without propagating again, for circuits of
+  Clifford gates and rotations.
+- Resampling of a sum, propagation with resampling, sampling of single paths, and an estimate
+  of the mean squared error of a truncation, with a seed for reproducible results.
 - QIR input: one unitary circuit, optionally followed by measurements. Branching on
   measurement results is rejected. OpenQASM works the same way once the QDK has compiled it
   to QIR.
 
-Truncated results are approximations. Nothing here bounds their error; check convergence by
-tightening the truncation.
+Truncated results are approximations. Nothing here bounds their error on a given circuit:
+`estimate_mse` gives its average over the angles of the rotations, and convergence is checked
+by tightening the truncation.
 
 ## How it works
 
@@ -159,12 +260,23 @@ operations in the same order however the sum is divided.
 In Rust, `pauliprop::propagate_in_zones` takes the size and the largest number of the zones,
 and `pauliprop::reference` is a second, simple propagation on a hash map.
 
+A gradient is computed as in PauliPropagation.jl: the observable is propagated backwards
+through the circuit, and then the circuit is undone gate by gate, on the propagated
+observable and on the values that its Pauli strings have in the state. At every rotation the
+two give the derivative with respect to its angle. Random numbers come from xoshiro256**,
+seeded through splitmix64, so that a seed gives the same result on every platform.
+
 ### Qubit numbering in QIR
 
 Observables refer to the qubits of the QIR program. These are the qubits of the Q# register in
 allocation order as long as the program measures only at the end. For the base profile the QDK
 moves a mid-circuit measurement to the end and continues on a fresh qubit, so after such a
 measurement the QIR qubits no longer number the Q# register.
+
+## Sample
+
+`samples/pauli_propagation.ipynb` goes from a Q# program to expectation values on 100 qubits,
+with truncation, noise, gradients, an error estimate and a surrogate.
 
 ## Building and testing
 
@@ -181,11 +293,12 @@ truncate grows without end, and a test run that does is ended rather than left t
 machine (`crates/core/tests/common/memory.rs`, `tests/conftest.py`).
 
 `tests/reference` holds results, circuits and gate tables from PauliPropagation.jl. To
-regenerate them, with a clone of that package in `~/dev/PauliPropagation.jl`:
+regenerate them, with a clone of that package next to this repository:
 
 ```bash
-julia --project=tools/julia -e 'using Pkg; Pkg.develop(path=joinpath(homedir(), "dev", "PauliPropagation.jl")); Pkg.add("JSON")'
+julia --project=tools/julia -e 'using Pkg; Pkg.instantiate()'
 julia --project=tools/julia tools/julia/generate_reference.jl
+julia --project=tools/julia tools/julia/generate_features.jl
 ```
 
 ## Benchmarks
@@ -243,6 +356,31 @@ as a whole against a second implementation of the same rules:
    random circuits of all gates, under every truncation, as observables and as states, on
    registers of several machine words, on wide registers that the sum does not fill, however
    the engine divides the sum and on any number of threads.
+
+7. **Free fermions** (`tests/test_free_fermions.py`). Circuits of RXX on neighbouring qubits
+   and RZ keep sums of products of two Majorana operators in that form, so they are evolved
+   exactly on any number of qubits by a matrix of twice that size. On 100 qubits every
+   coefficient of the propagated sum must match this evolution, which is itself checked
+   against dense matrices on four qubits.
+8. **Arithmetic, symmetries, gradients and surrogates** (`crates/core/tests/algebra.rs`,
+   `gradient.rs`, `surrogate.rs`, `tests/test_algebra.py`, `test_gradient.py`,
+   `test_surrogate.py`, `test_features_against_julia.py`). Products and commutators are checked
+   against matrix products, merged translations against translations written out by hand and
+   against PauliPropagation.jl, gradients against the parameter-shift rule on dense matrices
+   for every state and against the gradients of PauliPropagation.jl with and without
+   truncation, and surrogates against the propagation, bit for bit, and against the
+   surrogates of PauliPropagation.jl.
+9. **Random methods** (`crates/core/tests/montecarlo.rs`, `tests/test_montecarlo.py`,
+   `test_features_against_julia.py`). With a seed, resampling and sampled paths must equal the
+   same methods written out in Python on the same random numbers. Without one, their averages
+   must match the propagation within six standard errors. Error estimates must match an
+   enumeration of all paths, the measured error of truncated propagations, and the estimates
+   of PauliPropagation.jl from a million samples.
+
+10. **A third implementation** (`tests/test_against_qiskit_pauli_prop.py`). Where the
+    [pauli-prop](https://github.com/Qiskit/pauli-prop) package of Qiskit is installed, random
+    circuits of Clifford gates and rotations must give the same terms without truncation, as
+    observables and as states.
 
 ## Attribution
 
