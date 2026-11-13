@@ -11,6 +11,7 @@
 //! follow PauliPropagation.jl, <https://github.com/SparqleSim/PauliPropagation.jl>.
 
 mod algebra;
+mod capped;
 mod coeff;
 mod engine;
 mod gate;
@@ -22,6 +23,7 @@ pub mod reference;
 mod sum;
 mod surrogate;
 
+pub use capped::propagate_capped;
 pub use coeff::Coefficient;
 pub use gate::Gate;
 pub use gradient::{gradient, State};

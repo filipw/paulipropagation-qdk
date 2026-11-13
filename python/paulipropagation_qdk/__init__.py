@@ -56,6 +56,7 @@ def expectation(
     max_sins: int | None = None,
     weight_damping: tuple[float, float] | None = None,
     custom_truncation: Callable[[str, float | complex], bool] | None = None,
+    max_terms: int | None = None,
     threads: int | None = None,
 ) -> float | complex:
     """The expectation value of ``observable`` after ``circuit`` acts on the all-zero state.
@@ -73,6 +74,7 @@ def expectation(
         max_sins=max_sins,
         weight_damping=weight_damping,
         custom_truncation=custom_truncation,
+        max_terms=max_terms,
         threads=threads,
     )
     return evolved.overlap_with_zero()

@@ -517,6 +517,81 @@ fn clifford_gates_on_a_sum_that_no_gate_has_truncated() {
     assert!(with_custom > 0 && with_custom < all);
 }
 
+#[test]
+fn a_gate_away_from_a_sum_that_no_gate_has_truncated() {
+    // A gate where every term has the identity changes no term, and still it is after it
+    // that the terms the sum starts with are first held against the rules.
+    let mut rng = StdRng::seed_from_u64(11);
+    let (n, register) = (6, 12);
+    let away: Vec<usize> = (n..register).collect();
+    let rule = |string: &PauliString<1>, coeff: f64| string.weight() > 2 && coeff.abs() < 0.05;
+    let none = Truncation::none();
+    let light = Truncation {
+        max_weight: Some(3),
+        ..none
+    };
+    let large = Truncation {
+        min_abs_coeff: 0.05,
+        ..none
+    };
+    // Per kind of gate: how many, and the terms left by no rule, by weight, by size, by the
+    // custom rule.
+    let mut totals = [[0usize; 5]; 5];
+    for index in 0..200 {
+        let gate = moved(&any_gate(&mut rng, n), &away);
+        assert!(misses(&gate, &[0, 1, 2, 3, 4, 5]));
+        let kind = match gate {
+            Gate::Rotation { .. } => 1,
+            Gate::AmplitudeDamping { .. } => 2,
+            Gate::PauliChannel { .. } => 3,
+            Gate::TransferMap { .. } => 4,
+            _ => 0,
+        };
+        let circuit = [gate];
+        let mut start: PauliSum<1, f64> = PauliSum::new(register).unwrap();
+        for _ in 0..30 {
+            let weight = rng.gen_range(0..=n);
+            let ops = random_ops(&mut rng, n, weight);
+            start.add(&ops, real(&mut rng)).unwrap();
+        }
+        totals[kind][0] += 1;
+        for picture in [Picture::Heisenberg, Picture::Schrodinger] {
+            let what = format!("gate {index} away from the sum, {picture:?}");
+            let left = |truncation: &Truncation, custom| {
+                agreed_terms(&circuit, &start, truncation, picture, custom, &what).len()
+            };
+            totals[kind][1] += left(&none, None);
+            totals[kind][2] += left(&light, None);
+            totals[kind][3] += left(&large, None);
+            totals[kind][4] += left(&none, Some(&rule));
+            for (name, truncation) in truncations() {
+                let what = format!("{what}, {name}");
+                agreed_terms(&circuit, &start, &truncation, picture, None, &what);
+            }
+        }
+    }
+    for (kind, [gates, all, by_weight, by_size, by_rule]) in totals.into_iter().enumerate() {
+        assert!(gates >= 5, "{gates} gates of kind {kind}");
+        assert!(
+            by_weight > 0 && by_weight < all,
+            "kind {kind}: {by_weight} of {all}"
+        );
+        assert!(
+            by_rule > 0 && by_rule < all,
+            "kind {kind}: {by_rule} of {all}"
+        );
+        // A Clifford gate changes no coefficient, so it drops no term for its size.
+        if kind == 0 {
+            assert_eq!(by_size, all);
+        } else {
+            assert!(
+                by_size > 0 && by_size < all,
+                "kind {kind}: {by_size} of {all}"
+            );
+        }
+    }
+}
+
 /// Whether the gate acts on none of `qubits`.
 fn misses(gate: &Gate, qubits: &[usize]) -> bool {
     let away = |on: &[usize]| on.iter().all(|q| !qubits.contains(q));

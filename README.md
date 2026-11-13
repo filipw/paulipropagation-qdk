@@ -220,9 +220,15 @@ together and wait for the slowest of them.
   | `max_sins` | it took more sine branches of rotations than this |
   | `weight_damping=(gamma, threshold)` | `abs(coeff) * 10**(-gamma * weight) < threshold` |
   | `custom_truncation` | this function of the label and the coefficient returns true |
+  | `max_terms` | the sum has more terms than this and the term is not among the largest |
 
   A Clifford gate changes no coefficient but its sign, so after one only the options that read
   the Pauli string (`max_weight`, `weight_damping`, `custom_truncation`) drop anything.
+
+  `max_terms` bounds the memory and the time of a propagation whatever the circuit does: after
+  the other truncations, the terms with the largest coefficients in absolute value are kept.
+  It cannot be combined with `max_freq` or `max_sins`, and while the sum is close to
+  `max_terms` the gates are applied on one thread.
 - Expectation values in the all-zero state, the all-plus state, any computational basis
   state, the maximally mixed state, and a state given as a Pauli sum.
 - Sums, products and commutators of Pauli sums, and merging of the Pauli strings that a
@@ -357,12 +363,17 @@ as a whole against a second implementation of the same rules:
    registers of several machine words, on wide registers that the sum does not fill, however
    the engine divides the sum and on any number of threads.
 
-7. **Free fermions** (`tests/test_free_fermions.py`). Circuits of RXX on neighbouring qubits
+7. **A bound on the number of terms** (`crates/core/tests/capped.rs`, `tests/test_max_terms.py`).
+   A propagation with `max_terms` must equal, bit for bit, a propagation of one gate at a time
+   on the hash map with all terms sorted by size after every gate, on random circuits of all
+   gates, with real and complex coefficients, in both pictures, and with terms that are
+   equally large.
+8. **Free fermions** (`tests/test_free_fermions.py`). Circuits of RXX on neighbouring qubits
    and RZ keep sums of products of two Majorana operators in that form, so they are evolved
    exactly on any number of qubits by a matrix of twice that size. On 100 qubits every
    coefficient of the propagated sum must match this evolution, which is itself checked
    against dense matrices on four qubits.
-8. **Arithmetic, symmetries, gradients and surrogates** (`crates/core/tests/algebra.rs`,
+9. **Arithmetic, symmetries, gradients and surrogates** (`crates/core/tests/algebra.rs`,
    `gradient.rs`, `surrogate.rs`, `tests/test_algebra.py`, `test_gradient.py`,
    `test_surrogate.py`, `test_features_against_julia.py`). Products and commutators are checked
    against matrix products, merged translations against translations written out by hand and
@@ -370,17 +381,23 @@ as a whole against a second implementation of the same rules:
    for every state and against the gradients of PauliPropagation.jl with and without
    truncation, and surrogates against the propagation, bit for bit, and against the
    surrogates of PauliPropagation.jl.
-9. **Random methods** (`crates/core/tests/montecarlo.rs`, `tests/test_montecarlo.py`,
+10. **Random methods** (`crates/core/tests/montecarlo.rs`, `tests/test_montecarlo.py`,
    `test_features_against_julia.py`). With a seed, resampling and sampled paths must equal the
    same methods written out in Python on the same random numbers. Without one, their averages
    must match the propagation within six standard errors. Error estimates must match an
    enumeration of all paths, the measured error of truncated propagations, and the estimates
    of PauliPropagation.jl from a million samples.
 
-10. **A third implementation** (`tests/test_against_qiskit_pauli_prop.py`). Where the
+11. **A third implementation** (`tests/test_against_qiskit_pauli_prop.py`). Where the
     [pauli-prop](https://github.com/Qiskit/pauli-prop) package of Qiskit is installed, random
     circuits of Clifford gates and rotations must give the same terms without truncation, as
     observables and as states.
+
+## Related software
+
+[docs/comparison.md](docs/comparison.md) compares this package with PauliPropagation.jl, the
+pauli-prop package of Qiskit and cuPauliProp of NVIDIA cuQuantum: what each is for, a table of
+features, and timings where the same propagation can be run.
 
 ## Attribution
 

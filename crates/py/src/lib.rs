@@ -900,6 +900,12 @@ fn run<const W: usize, C: Scalar>(
 /// A Clifford gate changes no coefficient but its sign, so after one only `max_weight`,
 /// `weight_damping` and `custom_truncation` can drop a term.
 ///
+/// With `max_terms` the sum never has more terms than that after a gate: of a sum that the
+/// other truncations leave larger, the `max_terms` terms with the largest coefficients in
+/// absolute value are kept. This bounds the memory and the time of a propagation whatever
+/// the circuit. It cannot be combined with `max_freq` or `max_sins`, and close to
+/// `max_terms` the gates are applied on one thread.
+///
 /// `threads` is the number of threads to use, by default one per processor. The result does
 /// not depend on it.
 #[pyfunction]
@@ -914,6 +920,7 @@ fn run<const W: usize, C: Scalar>(
     max_sins=None,
     weight_damping=None,
     custom_truncation=None,
+    max_terms=None,
     heisenberg=true,
     threads=None,
 ))]
@@ -929,6 +936,7 @@ fn propagate(
     max_sins: Option<u32>,
     weight_damping: Option<(f64, f64)>,
     custom_truncation: Option<Py<PyAny>>,
+    max_terms: Option<usize>,
     heisenberg: bool,
     threads: Option<usize>,
 ) -> PyResult<PauliSum> {
@@ -950,7 +958,12 @@ fn propagate(
     let pool = threads.map(pool_of).transpose()?;
     let pool = pool.as_deref();
     dispatch!(&mut result.inner, s => run(py, s, callback, pool, |sum, custom| {
-        pauliprop::propagate_with(gates, sum, &truncation, picture, custom)
+        match max_terms {
+            Some(max_terms) => {
+                pauliprop::propagate_capped(gates, sum, &truncation, picture, custom, max_terms)
+            }
+            None => pauliprop::propagate_with(gates, sum, &truncation, picture, custom),
+        }
     }))?;
     Ok(result)
 }
