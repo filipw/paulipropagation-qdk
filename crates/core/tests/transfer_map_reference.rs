@@ -306,4 +306,25 @@ fn invalid_matrices_are_rejected() {
     assert!(propagate(&[outside], &mut sum, &Truncation::none()).is_err());
     let twice = Gate::unitary(&[1, 1], &flat(&identity(4))).unwrap();
     assert!(propagate(&[twice], &mut sum, &Truncation::none()).is_err());
+
+    // No qubits, and more than a transfer matrix is kept for.
+    assert!(Gate::transfer_map(&[], &[1.0]).is_err());
+    assert!(Gate::transfer_map(&[0, 1, 2, 3, 4, 5], &[]).is_err());
+
+    // A map that is given by its columns is checked when it is used: one column for every
+    // Pauli string on its qubits, with entries that are numbers and point to such strings.
+    let map = |columns: Vec<Vec<(usize, f64)>>| Gate::TransferMap {
+        qubits: vec![0],
+        columns,
+    };
+    let identity_columns = || (0..4).map(|i| vec![(i, 1.0)]).collect::<Vec<_>>();
+    let none = Truncation::none();
+    assert!(propagate(&[map(identity_columns())], &mut sum, &none).is_ok());
+    assert!(propagate(&[map(identity_columns()[..3].to_vec())], &mut sum, &none).is_err());
+    let mut outside = identity_columns();
+    outside[3] = vec![(4, 1.0)];
+    assert!(propagate(&[map(outside)], &mut sum, &none).is_err());
+    let mut not_a_number = identity_columns();
+    not_a_number[1] = vec![(1, f64::NAN)];
+    assert!(propagate(&[map(not_a_number)], &mut sum, &none).is_err());
 }

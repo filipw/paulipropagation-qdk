@@ -375,6 +375,47 @@ def test_the_estimated_error_is_the_error_of_the_truncated_propagation():
     assert scaled == pytest.approx(9 * estimate)
 
 
+def test_the_estimated_error_of_a_state():
+    # A state goes through the gates from the first to the last, and every rotation has a
+    # range of angles of its own.
+    rng = random.Random(9)
+    n = 5
+    rotations = [("ZZ", [q, q + 1]) for q in range(n - 1)] + [("X", [q]) for q in range(n)]
+    rotations = rotations * 3
+    radii = [0.2 + 2.8 * k / (len(rotations) - 1) for k in range(len(rotations))]
+
+    def circuit_of(steps):
+        circuit = pp.Circuit(n)
+        for paulis, qubits in steps:
+            circuit.rotation(paulis, qubits, 0.3)
+        return circuit
+
+    shape = circuit_of(rotations)
+    start = pp.PauliSum(n)
+    start.add("Z", [2])
+
+    errors = []
+    for _ in range(4000):
+        circuit = shape.with_angles([rng.uniform(-radius, radius) for radius in radii])
+        exact = pp.propagate(circuit, start, heisenberg=False, min_abs_coeff=0.0)
+        truncated = pp.propagate(circuit, start, heisenberg=False, max_weight=2, min_abs_coeff=0.0)
+        errors.append((exact.overlap_with_zero() - truncated.overlap_with_zero()) ** 2)
+    measured = sum(errors) / len(errors)
+    spread = math.sqrt(sum((e - measured) ** 2 for e in errors)) / len(errors)
+
+    samples = 400_000
+    estimate = pp.estimate_mse(shape, start, samples, thetas=radii, max_weight=2, heisenberg=False, seed=3)
+    sampling = math.sqrt(estimate * (1 - estimate) / samples)
+    assert estimate > 1e-3
+    assert estimate == pytest.approx(measured, abs=6 * (spread + sampling))
+
+    # It is the estimate for an observable and the gates in the other order, path for path.
+    backwards = circuit_of(rotations[::-1])
+    assert pp.estimate_mse(backwards, start, samples, thetas=radii[::-1], max_weight=2, seed=3) == estimate
+    as_observable = pp.estimate_mse(shape, start, samples, thetas=radii, max_weight=2, seed=3)
+    assert abs(as_observable - estimate) > 10 * sampling
+
+
 def test_an_error_estimate_rejects_what_it_cannot_do():
     circuit = trotter(4, 1)
     observable = pp.PauliSum(4)

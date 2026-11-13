@@ -33,6 +33,7 @@ FIXED = {
     "cy": np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, -1j], [0, 0, 1j, 0]], dtype=complex),
     "cz": np.diag([1, 1, 1, -1]).astype(complex),
     "swap": np.array([[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], dtype=complex),
+    "ccx": np.eye(8, dtype=complex)[[0, 1, 2, 3, 4, 5, 7, 6]],
 }
 ONE_QUBIT = ["h", "s", "s_adj", "sx", "t", "y"]
 TWO_QUBIT = ["cx", "cy", "cz", "swap"]
@@ -152,3 +153,63 @@ def test_observables_on_a_wide_register_match_their_light_cones(seed):
             assert value == pytest.approx(expected, abs=1e-12, rel=0), (paulis, qubits)
             largest = max(largest, abs(expected))
     assert largest > 0.1
+
+
+@pytest.mark.parametrize("n", [100, 200, 300])
+def test_complex_observables_on_a_wide_register_match_their_light_cones(n):
+    """A sum with complex coefficients, on registers of two, four and five 64-bit words."""
+    rng = random.Random(n)
+    gates = random_shallow_circuit(rng, n, 3)
+    circuit = build(n, gates)
+
+    observable = pp.PauliSum(n, dtype=complex)
+    expected = 0.0
+    for q in [0, 63, 64, 65, n // 2, n - 2]:
+        paulis, qubits = rng.choice("XYZ") + rng.choice("XYZ"), (q, q + 1)
+        coeff = complex(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0))
+        observable.add(paulis, list(qubits), coeff)
+        expected += coeff * expectation_on_the_cone(gates, paulis, qubits)[0]
+
+    evolved = pp.propagate(circuit, observable, min_abs_coeff=0.0)
+    assert evolved.dtype is complex
+    assert abs(expected.imag) > 1e-3
+    assert evolved.overlap_with_zero() == pytest.approx(expected, abs=1e-12, rel=0)
+
+    # The real and the imaginary part are propagated like sums of their own.
+    real = pp.PauliSum(n)
+    imaginary = pp.PauliSum(n)
+    for text, coeff in observable.terms():
+        real.add(text, list(range(n)), coeff.real)
+        imaginary.add(text, list(range(n)), coeff.imag)
+    parts = pp.propagate(circuit, real, min_abs_coeff=0.0) + 1j * pp.propagate(circuit, imaginary, min_abs_coeff=0.0)
+    assert parts.dtype is complex
+    difference = evolved - parts
+    assert len(evolved) > 100
+    assert difference.max_abs_coeff() < 1e-14
+    # A complex sum without imaginary parts is the real sum again.
+    assert dict(pp.propagate(circuit, real.astype(complex), min_abs_coeff=0.0).astype(float).terms()) == dict(
+        pp.propagate(circuit, real, min_abs_coeff=0.0).terms()
+    )
+
+
+def test_toffoli_gates_match_a_state_vector():
+    rng = random.Random(3)
+    n = 5
+    gates: Gates = []
+    for _ in range(5):
+        for q in range(n):
+            gates.append((rng.choice("XYZ"), (q,), rng.uniform(-math.pi, math.pi)))
+        gates.append(("ccx", tuple(rng.sample(range(n), 3)), None))
+    circuit = build(n, gates)
+
+    largest = 0.0
+    for paulis, qubits in [("Z", (0,)), ("X", (3,)), ("YZ", (1, 4)), ("ZZZ", (0, 2, 3)), ("XYZXY", (0, 1, 2, 3, 4))]:
+        expected, _ = expectation_on_the_cone(gates, paulis, qubits, register=n)
+        value = pp.expectation(circuit, single(n, paulis, list(qubits)), min_abs_coeff=0.0)
+        assert value == pytest.approx(expected, abs=1e-12, rel=0), (paulis, qubits)
+        largest = max(largest, abs(expected))
+    assert largest > 0.05
+
+    for qubits in [(0, 0, 1), (0, 1, 0), (1, 0, 0)]:
+        with pytest.raises(ValueError, match="distinct"):
+            circuit.ccx(*qubits)

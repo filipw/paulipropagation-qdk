@@ -67,6 +67,25 @@ def test_sums_on_different_registers_do_not_combine():
         b.translation_merge(3)
 
 
+def test_a_sum_and_a_circuit_describe_themselves():
+    total = pp.PauliSum(3)
+    total.add("XZ", [0, 2], 0.5)
+    total.add("Y", [1])
+    assert repr(total) == "PauliSum(num_qubits=3, terms=2, dtype=float)"
+    assert repr(total.astype(complex)) == "PauliSum(num_qubits=3, terms=2, dtype=complex)"
+    assert total.max_abs_coeff() == 1.0
+    assert pp.PauliSum(3).max_abs_coeff() == 0.0
+    assert total.coeff("XZ", [0, 2]) == 0.5
+    assert total.coeff("Z", [0]) == 0.0
+    with pytest.raises(ValueError, match="out of range"):
+        total.coeff("Z", [3])
+
+    circuit = pp.Circuit(3)
+    circuit.h(0)
+    circuit.rzz(0.1, 0, 2)
+    assert repr(circuit) == "Circuit(num_qubits=3, gates=2)"
+
+
 def as_integer(text: str) -> int:
     """The integer that PauliPropagation.jl holds a Pauli string in: two bits per qubit."""
     return sum(PAULIS.index(char) << (2 * q) for q, char in enumerate(text))

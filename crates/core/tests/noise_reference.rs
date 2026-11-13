@@ -146,4 +146,20 @@ fn invalid_noise_is_rejected() {
     assert!(propagate(&[out_of_range], &mut sum, &none).is_err());
     let repeated = Gate::pauli_channel(&[1, 1], &[(vec![X, X], 0.1)]).unwrap();
     assert!(propagate(&[repeated], &mut sum, &none).is_err());
+
+    // A channel that is given by its factors is checked when it is used: one factor for
+    // every Pauli string on its qubits, none of them above one.
+    let channel = |factors: &[f64]| Gate::PauliChannel {
+        qubits: vec![0],
+        factors: factors.to_vec(),
+    };
+    assert!(propagate(&[channel(&[1.0, 0.5, 0.5, -1.0])], &mut sum, &none).is_ok());
+    assert!(propagate(&[channel(&[1.0, 0.5, 0.5])], &mut sum, &none).is_err());
+    assert!(propagate(&[channel(&[1.0, 1.5, 0.5, 1.0])], &mut sum, &none).is_err());
+    assert!(propagate(&[channel(&[1.0, 0.5, f64::NAN, 1.0])], &mut sum, &none).is_err());
+    let no_qubits = Gate::PauliChannel {
+        qubits: vec![],
+        factors: vec![1.0],
+    };
+    assert!(propagate(&[no_qubits], &mut sum, &none).is_err());
 }

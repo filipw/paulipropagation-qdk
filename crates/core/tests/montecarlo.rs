@@ -1112,6 +1112,92 @@ fn the_estimated_error_is_the_mean_squared_error_of_the_truncated_propagation() 
 }
 
 #[test]
+fn the_estimated_error_follows_the_picture_and_the_range_of_every_angle() {
+    // Every rotation has a range of angles of its own and the circuit is not its reverse,
+    // so the estimate is the measured error only if every range goes to its rotation, for
+    // an observable and for a state.
+    let mut rng = StdRng::seed_from_u64(54);
+    let n = 5;
+    let mut start = Sum::new(n).unwrap();
+    start.add(&[(2, PauliOp::Z)], 1.0).unwrap();
+    let string = start.sorted_terms()[0].0;
+    let truncation = Truncation {
+        max_weight: Some(2),
+        ..Truncation::none()
+    };
+    let limits = PathLimits {
+        max_weight: Some(2),
+        ..PathLimits::default()
+    };
+    let shape = trotter_circuit(&mut rng, n, 3);
+    // Narrow ranges for the first rotations of the circuit and wide ones for the last.
+    let radii: Vec<f64> = (0..shape.len())
+        .map(|k| 0.2 + 2.8 * k as f64 / (shape.len() - 1) as f64)
+        .collect();
+    let reversed: Vec<f64> = radii.iter().rev().copied().collect();
+    let samples = 1_600_000;
+
+    let mut estimates = Vec::new();
+    for picture in [Picture::Heisenberg, Picture::Schrodinger] {
+        let mut error = Mean::default();
+        for _ in 0..60_000 {
+            let circuit: Vec<Gate> = shape
+                .iter()
+                .zip(&radii)
+                .map(|(gate, &radius)| match gate {
+                    Gate::Rotation { generator, .. } => {
+                        Gate::rotation(generator, rng.gen_range(-radius..radius))
+                    }
+                    _ => unreachable!(),
+                })
+                .collect();
+            let (mut exact, mut truncated) = (start.clone(), start.clone());
+            propagate_with(&circuit, &mut exact, &Truncation::none(), picture, None).unwrap();
+            propagate_with(&circuit, &mut truncated, &truncation, picture, None).unwrap();
+            error.add((exact.overlap_with_zero() - truncated.overlap_with_zero()).powi(2));
+        }
+
+        let estimate_with = |radii: &[f64]| {
+            estimate_mse(
+                &shape,
+                n,
+                &string,
+                1.0,
+                samples,
+                radii,
+                &limits,
+                None,
+                &State::Zero,
+                picture,
+                &mut Rng::new(13),
+            )
+            .unwrap()
+        };
+        let estimate = estimate_with(&radii);
+        let sampling = (estimate * (1.0 - estimate) / samples as f64).sqrt();
+        let allowed = 6.0 * (error.error() + sampling);
+        assert!(estimate > 1e-3);
+        assert!(
+            (estimate - error.value()).abs() <= allowed,
+            "{picture:?}: estimate {estimate}, measured {} +- {}",
+            error.value(),
+            error.error()
+        );
+        // The ranges in the other order give an estimate that the measurement rules out.
+        let swapped = estimate_with(&reversed);
+        assert!(
+            (swapped - error.value()).abs() > allowed,
+            "{picture:?}: {swapped} with the ranges reversed, measured {} +- {}",
+            error.value(),
+            error.error()
+        );
+        estimates.push(estimate);
+    }
+    // The two pictures have errors of their own.
+    assert!((estimates[0] - estimates[1]).abs() > 2e-3, "{estimates:?}");
+}
+
+#[test]
 fn coefficients_of_any_kind_can_be_sampled() {
     // The complex sum (1 + 2i) O is sampled like O.
     let mut rng = StdRng::seed_from_u64(53);

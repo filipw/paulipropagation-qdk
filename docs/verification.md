@@ -34,7 +34,7 @@ flowchart LR
 | Random numbers | xoshiro256** seeded through splitmix64: for five seeds, the first six numbers and the 1001st of the reference C code by Blackman and Vigna | `montecarlo.rs` |
 | pauli-prop | random circuits of Clifford gates and rotations without truncation, in both pictures; runs where pauli-prop is installed | `test_against_qiskit_pauli_prop.py` |
 | Stim | Clifford circuits on 1 to 512 qubits: string and sign in both pictures, expectation values in stabilizer states; the 127-qubit kicked Ising circuit at its Clifford point | `test_against_stim.py` |
-| Light cones | 300 qubits, shallow circuits of all gates, observables at the register ends and at the 64-bit word boundaries against a state vector of the light cone | `test_light_cones.py` |
+| Light cones | 300 qubits, shallow circuits of all gates, observables at the register ends and at the 64-bit word boundaries against a state vector of the light cone; complex sums on 100, 200 and 300 qubits | `test_light_cones.py` |
 | Published results | see [below](#published-results) | `test_published_results.py` |
 
 ## Published results
@@ -126,6 +126,37 @@ Notes for repeating it:
 | 12,000 gates on 5 qubits, 5,998 rotations, no truncation | PauliPropagation.jl with 256-bit coefficients and angles | 6.1e-16 |
 
 `test_rounding_stays_small_through_a_deep_circuit` allows 1e-14.
+
+## Coverage
+
+Lines of the two crates that the two test suites run, measured with `cargo llvm-cov` on
+instrumented release builds: 111 Rust tests and 462 Python tests.
+
+| Crate | Lines | Run | Functions | Run |
+| --- | ---: | ---: | ---: | ---: |
+| `crates/core` (engine) | 3,125 | 99.3 % | 410 | 99.0 % |
+| `crates/py` (Python interface) | 958 | 97.6 % | 167 | 96.4 % |
+| Both | 4,083 | 98.9 % | 577 | 98.3 % |
+
+The lines of the engine that no test runs, as `--show-missing-lines` lists them:
+
+| Lines | What |
+| ---: | --- |
+| 6 | `Clone` and `Default` of two types |
+| 4 | `unreachable!` arms |
+| 4 | branches of resampling that its arithmetic rules out |
+| 3 | a panic in another thread: the flag it sets and the locks it leaves |
+| 2 | a round without work for the threads |
+| 1 | a surrogate with more than 2^32 nodes |
+
+```bash
+eval "$(cargo llvm-cov show-env --sh)"
+cargo llvm-cov clean --workspace
+cargo test --release -p pauliprop
+maturin develop --release
+pytest
+cargo llvm-cov report --release
+```
 
 ## Running the checks
 
