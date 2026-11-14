@@ -73,32 +73,35 @@ Tolerance: 1e-11 times the largest coefficient of the reference, fixed before th
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | 0 to 99,999 | 100,000 | 5,205,822 | 115,978 | 18,610 | 3,498 terms | 0 |
 | 100,000 to 1,099,999 | 1,000,000 | 51,724,210 | 1,177,255 | 185,514 | 6,733 terms | 0 |
+| 1,100,000 to 11,099,999 | 10,000,000 | 517,910,327 | 11,760,398 | 1,849,380 | 12,025 terms | 0 |
 | 2,000,000 to 2,003,999, `--growth 18` | 4,000 | 428,262 | 5,288 | 710 | 7,056 terms | 0 |
 
-Apple M4 Pro, PauliPropagation.jl 0.9.2, Julia 1.13.3. The million cases took 16 minutes:
+Apple M4 Pro, PauliPropagation.jl 0.9.2, Julia 1.13.3. The ten million cases took 99 minutes
+with 8 processes:
 
-| Of the million cases | |
+| Of the ten million cases | |
 | --- | ---: |
-| Observables / states | 700,431 / 299,569 |
-| Complex coefficients | 199,686 |
-| More than 32 qubits | 150,494 |
-| Gates | 29,749,538 |
-| `max_weight` set | 349,636 |
-| `min_abs_coeff` positive | 599,082 |
-| Each other truncation | about 150,000 |
-| Gradients compared | 117,706 |
+| Observables / states | 7,000,949 / 2,999,051 |
+| Complex coefficients | 2,001,724 |
+| More than 32 qubits | 1,499,099 |
+| Gates | 297,562,828 |
+| `max_weight` set | 3,500,623 |
+| `min_abs_coeff` positive | 6,000,307 |
+| Each other truncation | about 1,500,000 |
+| Gradients compared | 1,175,562 |
 
 | Largest difference, all runs | Relative to the largest coefficient |
 | --- | ---: |
-| Overlap | 2.4e-15 |
-| Coefficient | 1.8e-15 |
-| Derivative | 1.8e-15 |
-| Merged coefficient | 2.1e-15 |
+| Overlap | 3.6e-15 |
+| Coefficient | 2.4e-15 |
+| Derivative | 2.5e-15 |
+| Merged coefficient | 2.6e-15 |
 
 What it shows:
 
 - Agreement on every gate rule, sign, truncation and their order, in both pictures.
-- N clean cases bound the share of such cases that differ below 3/N at 95 % confidence.
+- N clean cases bound the share of such cases that differ below 3/N at 95 % confidence:
+  below 3e-7 for the 11.1 million.
 
 What it does not show:
 
