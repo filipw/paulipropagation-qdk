@@ -35,7 +35,7 @@ its generator into two, equal strings are added up, small terms are dropped.
 | Surrogate for many angles | yes | yes | no | no |
 | Resampling and Monte Carlo paths | yes | yes | no | no |
 | Estimate of the truncation error | yes | yes | sum of the dropped coefficients | no |
-| Merging by symmetry | translations on rings and tori, or any function | translations, or any function | no | no |
+| Merging by symmetry | translations on rings and tori, or any function | translations on rings and tori, or any function | no | no |
 | Imaginary-time evolution | no | yes | no | no |
 | Operator conjugated by an operator | no | no | yes, with a largest number of terms | no |
 | Same result on any number of threads | bit for bit | not stated | one thread | not stated |
@@ -67,7 +67,8 @@ When comparing numbers with pauli-prop:
   different points of a gate. They approach each other as the threshold is lowered.
 - Its largest number of terms counts terms before equal strings are added up, so it has to be
   set well above the size of the result if it is not meant to act.
-- An operator that it returns can list a Pauli string more than once.
+- An operator that it returns can list a Pauli string more than once, so its numbers of terms
+  below are not like for like.
 
 ## Timings
 
@@ -76,7 +77,7 @@ Apple M4 Pro (eight performance cores).
 
 ### PauliPropagation.jl
 
-Truncation by weight and by coefficient; both packages give the same number of terms and the
+Truncation by coefficient, in the first two cases also by weight; both packages give the same number of terms and the
 same expectation value. Julia in its fastest configuration for the number of threads.
 
 ```bash
