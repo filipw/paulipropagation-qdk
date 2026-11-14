@@ -65,8 +65,10 @@ evolved = pp.propagate(circuit, observable, max_weight=6, min_abs_coeff=1e-4)
 print(len(evolved), evolved.overlap_with_zero())
 ```
 
-`samples/pauli_propagation.ipynb` goes from a Q# program to expectation values on 100 qubits,
-with truncation, noise, gradients, an error estimate and a surrogate.
+| Notebook | From | Shows |
+| --- | --- | --- |
+| `samples/pauli_propagation.ipynb` | Q# | 100 qubits, truncation, noise, gradients, an error estimate, a surrogate |
+| `samples/pauli_propagation_openqasm.ipynb` | OpenQASM 2 and 3 | 100 qubits, truncation, noise, gates that the QDK decomposes, input parameters |
 
 ## Features
 
@@ -242,12 +244,38 @@ By default all cores are used once the sum is large enough. The result does not 
 number of threads. On processors with performance and efficiency cores, the number of
 performance cores is usually fastest.
 
+### OpenQASM
+
+```python
+from qdk import openqasm, qsharp
+
+qir = openqasm.compile("""
+OPENQASM 3.0;
+include "stdgates.inc";
+qubit[3] q;
+output bit[3] c;
+h q[0];
+cx q[0], q[1];
+cry(0.4) q[1], q[2];
+c = measure q;
+""", target_profile=qsharp.TargetProfile.Base)
+circuit = pp.circuit_from_qir(str(qir))
+```
+
+- OpenQASM 2 and 3. Controlled rotations, `U`, gate modifiers and the gates that a program
+  defines arrive as Clifford gates and rotations, decomposed by the QDK.
+- `input` parameters are bound when compiling: `import_openqasm(source, name="Main",
+  program_type=ProgramType.File)`, then `openqasm.compile(code.qasm_import.Main, *values)`.
+- The QDK reduces angles to the range from 0 to 2π, so `circuit.angles` holds `2π - 0.4` for
+  `rx(-0.4)`. Expectation values do not change.
+
 ### QIR and qubit numbering
 
 - A QIR program is one unitary circuit, optionally followed by measurements. Branching on
   measurement results is rejected.
 - Observables refer to the qubits of the QIR program. These are the qubits of the Q# register
-  in allocation order as long as the program measures only at the end.
+  in allocation order, or of the OpenQASM registers in the order of their declarations, as
+  long as the program measures only at the end.
 
 ## How it works
 

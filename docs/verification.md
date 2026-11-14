@@ -22,7 +22,7 @@ flowchart LR
 | Reference | Checks | Tests |
 | --- | --- | --- |
 | Dense matrices | every Clifford gate and all 63 rotations on 3 qubits on all 64 strings against `U† P U`; noise and transfer maps against Kraus operators; states against `U rho U†`; complex coefficients; overlaps; every truncation against a term-by-term propagation | `crates/core/tests` |
-| QDK simulators | random Q# circuits through QIR against the QDK state vector, as observables and states; with a `NoiseConfig`, against a million shots of the noisy simulators | `tests/test_*qdk*.py`, `test_truncation_options.py` |
+| QDK simulators | random Q# circuits and random OpenQASM 2 and 3 programs through QIR against the QDK state vector of the same source, as observables and states; with a `NoiseConfig`, against a million shots of the noisy simulators | `tests/test_*qdk*.py`, `test_truncation_options.py` |
 | numpy | random unitaries and channels from Kraus operators against a state vector and a density matrix | `test_matrix_gates_against_numpy.py` |
 | PauliPropagation.jl | truncated sums term by term on circuits it built: every truncation, noise, complex coefficients, states, matrix gates, its README example, 100 qubits | `test_against_julia.py` |
 | Tests of PauliPropagation.jl | the cases of its test files, with its Clifford tables and circuit builders as data | `test_conformance_*.py` |
