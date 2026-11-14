@@ -133,7 +133,9 @@ def test_resampling_is_unbiased_and_keeps_the_input():
     for text, coeff in before:
         # A comb changes a coefficient by less than its spacing.
         assert means[text] == pytest.approx(coeff, abs=6 * spacing / math.sqrt(runs))
-    assert pp.resample(start, 25).terms() != pp.resample(start, 25).terms()
+    # Without a seed every call draws its own. A comb over these 80 terms has fewer than a
+    # hundred outcomes, so two calls can agree, but not thirty.
+    assert len({tuple(pp.resample(start, 25).terms()) for _ in range(30)}) > 1
 
 
 def test_resampling_by_squares_keeps_the_sum_of_squares():
