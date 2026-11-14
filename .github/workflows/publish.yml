@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       testpypi:
-        description: Upload to TestPyPI
+        description: Also upload to TestPyPI (unticked = build and test only; PyPI is uploaded to only by a release)
         type: boolean
         default: false
   pull_request:
@@ -48,8 +48,8 @@ jobs:
           - { platform: windows, os: windows-latest, target: x64 }
           - { platform: windows, os: windows-11-arm, target: aarch64 }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - if: matrix.os == 'windows-11-arm'
@@ -61,7 +61,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --locked --out dist
           manylinux: auto
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.platform }}-${{ matrix.target }}
           path: dist
@@ -69,12 +69,12 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: --out dist
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       # Builds the extension from the sdist alone, which fails if a source file is missing.
@@ -84,7 +84,7 @@ jobs:
           python -m venv venv
           venv/bin/pip install "$GITHUB_WORKSPACE"/dist/*.tar.gz
           venv/bin/python -c "$SMOKE_TEST"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist
@@ -104,11 +104,11 @@ jobs:
           - { os: windows-latest, wheels: wheels-windows-x64, python: "3.10", deps: stim }
           - { os: windows-11-arm, wheels: wheels-windows-aarch64, python: "3.12", deps: "" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.wheels }}
           path: dist
@@ -125,11 +125,11 @@ jobs:
     needs: wheels
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: wheels-linux-aarch64
           path: dist
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
       - name: Install the wheel and run the smoke test
@@ -139,7 +139,7 @@ jobs:
 
   # A release goes to PyPI, a manual run with `testpypi` ticked to TestPyPI.
   publish:
-    name: upload to ${{ github.event_name == 'release' && 'PyPI' || 'TestPyPI' }}
+    name: upload to PyPI or TestPyPI
     needs: [wheels, sdist, test, test-linux-aarch64]
     if: github.event_name == 'release' || inputs.testpypi
     runs-on: ubuntu-latest
@@ -149,7 +149,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -185,7 +185,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
