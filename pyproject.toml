@@ -1,15 +1,31 @@
 [build-system]
-requires = ["maturin>=1.7,<2"]
+requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
 
 [project]
 name = "paulipropagation-qdk"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Pauli propagation for circuits compiled with the Microsoft Quantum Development Kit"
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["pyqir>=0.12.8,<0.13"]
+keywords = ["quantum computing", "pauli propagation", "qdk", "q#", "qir", "simulation"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.urls]
+Repository = "https://github.com/filipw/paulipropagation-qdk"
+Issues = "https://github.com/filipw/paulipropagation-qdk/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8", "numpy>=1.24", "qdk>=1.34", "stim>=1.13"]

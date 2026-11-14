@@ -25,7 +25,13 @@ flowchart LR
 
 ## Install
 
-From source, with Rust and Python 3.10 or later:
+Python 3.10 or later; wheels for Linux and Windows (x86-64, arm64) and macOS (arm64):
+
+```bash
+pip install paulipropagation-qdk
+```
+
+From source, with Rust:
 
 ```bash
 uv venv --python 3.12 .venv && source .venv/bin/activate
@@ -269,8 +275,8 @@ of exhausting the machine.
 
 | | |
 | --- | --- |
-| [docs/verification.md](docs/verification.md) | what the results are checked against, and the runs that were made |
-| [docs/comparison.md](docs/comparison.md) | comparison with PauliPropagation.jl, Qiskit pauli-prop and cuPauliProp: features and timings |
+| [docs/verification.md](https://github.com/filipw/paulipropagation-qdk/blob/main/docs/verification.md) | what the results are checked against, and the runs that were made |
+| [docs/comparison.md](https://github.com/filipw/paulipropagation-qdk/blob/main/docs/comparison.md) | comparison with PauliPropagation.jl, Qiskit pauli-prop and cuPauliProp: features and timings |
 
 ## License and attribution
 

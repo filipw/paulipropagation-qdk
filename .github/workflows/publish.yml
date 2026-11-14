@@ -1,0 +1,196 @@
+name: publish
+
+# Builds the wheels and the sdist, tests them, and uploads them to PyPI when a GitHub release is
+# published. A manual run builds and tests, and uploads to TestPyPI when `testpypi` is ticked. A
+# pull request that touches the build configuration builds and tests.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      testpypi:
+        description: Upload to TestPyPI
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - pyproject.toml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - .github/workflows/publish.yml
+
+permissions:
+  contents: read
+
+env:
+  # Imports the installed package (not the source tree) and checks one value: <ZZ> = cos(0.3).
+  SMOKE_TEST: |
+    import math, paulipropagation_qdk as pp
+    c = pp.Circuit(2); c.h(0); c.cx(0, 1); c.rx(0.3, 1)
+    o = pp.PauliSum(2); o.add("ZZ", [0, 1])
+    v = pp.expectation(c, o)
+    assert abs(v - math.cos(0.3)) < 1e-12, v
+    print(pp.__file__, v)
+
+jobs:
+  wheels:
+    name: wheel ${{ matrix.platform }} ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux, os: ubuntu-latest, target: x86_64 }
+          - { platform: linux, os: ubuntu-latest, target: aarch64 }
+          - { platform: macos, os: macos-latest, target: aarch64 }
+          - { platform: windows, os: windows-latest, target: x64 }
+          - { platform: windows, os: windows-11-arm, target: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: matrix.os == 'windows-11-arm'
+        uses: dtolnay/rust-toolchain@stable
+      # The extension uses the stable ABI (abi3-py310), so one wheel per platform serves every
+      # Python from 3.10. The arm64 Linux wheel is cross-compiled.
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          manylinux: auto
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
+          path: dist
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Builds the extension from the sdist alone, which fails if a source file is missing.
+      - name: Build and test from the sdist
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv venv
+          venv/bin/pip install "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          venv/bin/python -c "$SMOKE_TEST"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  test:
+    name: test ${{ matrix.os }}
+    needs: wheels
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Python the wheels declare, except on Windows arm64, where numpy has wheels
+          # from 3.12 and stim has none (its tests are skipped without it).
+          - { os: ubuntu-latest, wheels: wheels-linux-x86_64, python: "3.10", deps: stim }
+          - { os: macos-latest, wheels: wheels-macos-aarch64, python: "3.10", deps: stim }
+          - { os: windows-latest, wheels: wheels-windows-x64, python: "3.10", deps: stim }
+          - { os: windows-11-arm, wheels: wheels-windows-aarch64, python: "3.12", deps: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.wheels }}
+          path: dist
+      - name: Install the wheel
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl pytest numpy qdk ${{ matrix.deps }}
+          python -c "$SMOKE_TEST"
+      - name: Python tests against the installed wheel
+        run: python -m pytest -q
+
+  test-linux-aarch64:
+    name: test linux aarch64 (emulated)
+    needs: wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-aarch64
+          path: dist
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Install the wheel and run the smoke test
+        run: >
+          docker run --rm --platform linux/arm64 -e SMOKE_TEST -v "$PWD/dist:/dist" python:3.10-slim
+          sh -c 'pip install /dist/*.whl && python -c "$SMOKE_TEST"'
+
+  # A release goes to PyPI, a manual run with `testpypi` ticked to TestPyPI.
+  publish:
+    name: upload to ${{ github.event_name == 'release' && 'PyPI' || 'TestPyPI' }}
+    needs: [wheels, sdist, test, test-linux-aarch64]
+    if: github.event_name == 'release' || inputs.testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
+      url: ${{ github.event_name == 'release' && 'https://pypi.org' || 'https://test.pypi.org' }}/p/paulipropagation-qdk
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # Five wheels and the sdist, all of the version in the Cargo workspace, which on a release
+      # must be the tag without its leading "v".
+      - name: Check the files
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ls -l dist
+          test "$(ls dist | wc -l)" -eq 6
+          version="$(ls dist/*.tar.gz | sed 's|.*/paulipropagation_qdk-\(.*\)\.tar\.gz|\1|')"
+          if [ -n "$TAG" ] && [ "$version" != "${TAG#v}" ]; then
+            echo "version $version does not match the tag $TAG"; exit 1
+          fi
+          for f in dist/*; do
+            case "$(basename "$f")" in
+              "paulipropagation_qdk-$version-"*.whl | "paulipropagation_qdk-$version.tar.gz") ;;
+              *) echo "$f is not version $version"; exit 1 ;;
+            esac
+          done
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+
+  # In its own job, so the job that holds the PyPI token has no write access to the repository.
+  # --clobber lets a re-run replace files that an earlier attempt attached.
+  release-assets:
+    name: attach to the GitHub release
+    needs: publish
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload the wheels and the sdist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
