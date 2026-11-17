@@ -7,17 +7,23 @@ The circuit is the evolution of a transverse-field Ising chain of 100 qubits in 
 and the observable is Z on qubit 50. The only truncation that both packages have is the one
 by the size of the coefficients, so that is what is compared, at three thresholds. Only the
 propagation is timed, with the circuit already in the form that each package works on, and
-the best of three runs is printed. pauli-prop works on one thread.
+the best of three runs is printed and written to ``benchmarks/results/qiskit_pauli_prop.json``.
+pauli-prop works on one thread.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import time
+from importlib.metadata import version
+from pathlib import Path
 
 import numpy as np
 from pauli_prop import circuit_to_rotation_gates, propagate_through_rotation_gates
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
+from run import processor
 
 import paulipropagation_qdk as pp
 
@@ -51,6 +57,12 @@ def main() -> None:
     operator = SparsePauliOp.from_sparse_list([("Z", [SITE], 1.0)], num_qubits=QUBITS)
     rotations = circuit_to_rotation_gates(theirs)
 
+    report = {
+        "versions": {name: version(name) for name in ("paulipropagation-qdk", "pauli-prop")},
+        "processor": processor(),
+        "cores": os.cpu_count(),
+        "thresholds": {},
+    }
     print(f"{'threshold':>9}  {'package':<28} {'terms':>8}  {'<Z>':>13}  {'seconds':>8}")
     for threshold in (1e-4, 1e-5, 1e-6):
         seconds, (evolved, _) = best_of(
@@ -59,12 +71,22 @@ def main() -> None:
         diagonal = ~evolved.paulis.x.any(axis=1)
         value = float(np.real(evolved.coeffs[diagonal].sum()))
         print(f"{threshold:>9g}  {'pauli-prop':<28} {len(evolved):>8}  {value:>13.9f}  {seconds:>8.3f}")
+        entry = report["thresholds"][f"{threshold:g}"] = {
+            "pauli-prop": {"terms": len(evolved), "expectation": value, "seconds": seconds},
+            "paulipropagation-qdk": {"seconds": {}},
+        }
         for threads in (1, 8):
             seconds, evolved = best_of(
                 lambda: pp.propagate(ours, observable, min_abs_coeff=threshold, threads=threads)
             )
             name = f"this package, {threads} thread{'s' if threads > 1 else ''}"
             print(f"{threshold:>9g}  {name:<28} {len(evolved):>8}  {evolved.overlap_with_zero():>13.9f}  {seconds:>8.3f}")
+            ours_entry = entry["paulipropagation-qdk"]
+            ours_entry["terms"] = len(evolved)
+            ours_entry["expectation"] = evolved.overlap_with_zero()
+            ours_entry["seconds"][str(threads)] = seconds
+    path = Path(__file__).parent / "results" / "qiskit_pauli_prop.json"
+    path.write_text(json.dumps(report, indent=2) + "\n")
 
 
 if __name__ == "__main__":

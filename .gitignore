@@ -221,3 +221,4 @@ __marimo__/
 
 # Julia
 Manifest.toml
+.DS_Store

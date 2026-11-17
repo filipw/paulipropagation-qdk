@@ -41,8 +41,7 @@ its generator into two, equal strings are added up, small terms are dropped.
 | Same result on any number of threads | bit for bit | not stated | one thread | not stated |
 
 - "Not stated": the documentation of the package does not say.
-- cuPauliProp was not run. Its entries are from its Python interface,
-  `cuquantum.pauliprop.experimental`.
+- The entries of cuPauliProp are from its Python interface, `cuquantum.pauliprop.experimental`.
 
 ## Specific to each
 
@@ -59,7 +58,7 @@ its generator into two, equal strings are added up, small terms are dropped.
 | --- | --- | --- |
 | PauliPropagation.jl | every term under every truncation, with noise, as states; gradients, surrogates, merged symmetries, error estimates; random cases | [verification.md](verification.md) |
 | pauli-prop | every term on random circuits of Clifford gates and rotations without truncation, in both pictures | `tests/test_against_qiskit_pauli_prop.py` |
-| cuPauliProp | not run | |
+| cuPauliProp | every term on the three benchmark circuits of up to a million terms, truncated by coefficient and by weight: no term in only one result, every coefficient equal to the last bit; on the two noisy circuits of 3.7e7 and 1.3e8 terms the number of terms, and the expectation value and the norm to 5e-14 | `benchmarks/cupauliprop.py` |
 
 When comparing numbers with pauli-prop:
 
@@ -72,8 +71,13 @@ When comparing numbers with pauli-prop:
 
 ## Timings
 
-Only where the same propagation can be run and the results agree. Best of three runs on an
-Apple M4 Pro (eight performance cores).
+Only where the same propagation can be run and the results agree. Best of three runs. The
+measured numbers are in [`benchmarks/results`](../benchmarks/results).
+
+| Machine | Processor | GPU |
+| --- | --- | --- |
+| Laptop | Apple M4 Pro, eight performance cores | |
+| Azure `Standard_NC40ads_H100_v5` | AMD EPYC 9V84, 40 cores | NVIDIA H100 NVL, 94 GB |
 
 ### PauliPropagation.jl
 
@@ -85,12 +89,27 @@ julia -t 8 --project=tools/julia tools/julia/benchmark.jl
 python benchmarks/run.py --threads 1,8
 ```
 
+Apple M4 Pro:
+
 | Case | Terms | paulipropagation-qdk, 1 thread | Julia, 1 thread | paulipropagation-qdk, 8 threads | Julia, 8 threads |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 1.5 ms | 1.6 ms | 1.5 ms | 1.9 ms |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 1.4 ms | 1.6 ms | 1.4 ms | 1.9 ms |
 | Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 49 ms | 57 ms | 19 ms | 20 ms |
-| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.66 s | 0.65 s | 0.11 s | 0.12 s |
-| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 17.5 s | 17.6 s | 3.4 s | 3.6 s |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.65 s | 0.65 s | 0.11 s | 0.12 s |
+| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 17.4 s | 17.6 s | 3.8 s | 3.6 s |
+
+AMD EPYC 9V84, where the last case is the one before it with a lower threshold:
+
+| Case | Terms | paulipropagation-qdk, 1 thread | Julia, 1 thread | paulipropagation-qdk, 40 threads | Julia, 40 threads |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 3.8 ms | 2.7 ms | 3.8 ms | 3.0 ms |
+| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 0.11 s | 73 ms | 70 ms | 74 ms |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 1.5 s | 1.1 s | 0.23 s | 0.17 s |
+| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 40.2 s | 29.1 s | 4.0 s | 3.5 s |
+| The same, with a lower threshold | 131,664,350 | 135 s | 97.4 s | 13.8 s | 12.5 s |
+
+- On the M4 Pro the two packages are level. On the EPYC processor PauliPropagation.jl is 1.4 to
+  1.5 times faster on one thread, and on 40 threads between level and 1.35 times faster.
 
 ### pauli-prop
 
@@ -103,9 +122,9 @@ python benchmarks/qiskit_pauli_prop.py
 
 | Threshold | Terms, pauli-prop | Terms, paulipropagation-qdk | pauli-prop | paulipropagation-qdk, 1 thread | paulipropagation-qdk, 8 threads |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1e-4 | 44,037 | 39,398 | 0.27 s | 0.023 s | 0.009 s |
+| 1e-4 | 44,037 | 39,398 | 0.26 s | 0.023 s | 0.009 s |
 | 1e-5 | 138,626 | 128,403 | 0.75 s | 0.069 s | 0.018 s |
-| 1e-6 | 353,187 | 333,977 | 1.83 s | 0.175 s | 0.036 s |
+| 1e-6 | 353,187 | 333,977 | 1.81 s | 0.174 s | 0.036 s |
 
 - Expectation values agree to 6e-4 at the first threshold and to 3e-6 at the last.
 - One circuit on one machine. pauli-prop is written for a different use, in which the largest
@@ -113,4 +132,25 @@ python benchmarks/qiskit_pauli_prop.py
 
 ### cuPauliProp
 
-No timings: it needs hardware that this comparison was not run on.
+On the Azure machine: cuPauliProp on the GPU next to the two CPU packages on 40 cores, with the
+truncation of the case after every gate. cuPauliProp writes to two buffers that are allocated
+once; with buffers allocated for every gate it takes 2 to 30% longer.
+[`benchmarks/azureml`](../benchmarks/azureml) has the job that runs all three.
+
+```bash
+python benchmarks/cupauliprop.py
+```
+
+| Case | Terms | paulipropagation-qdk, 40 threads | Julia, 40 threads | cuPauliProp |
+| --- | ---: | ---: | ---: | ---: |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 3.8 ms | 3.0 ms | 0.34 s |
+| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 70 ms | 74 ms | 0.95 s |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.23 s | 0.17 s | 0.50 s |
+| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 4.0 s | 3.5 s | 1.6 s |
+| The same, with a lower threshold | 131,664,350 | 13.8 s | 12.5 s | 4.6 s |
+
+- Up to a million terms the GPU is slower: a gate costs it at least 0.17 ms, however small the
+  sum.
+- At 3.7e7 terms it is 2.4 times faster than paulipropagation-qdk on 40 cores, at 1.3e8 terms
+  3.0 times.
+- One GPU and one machine.

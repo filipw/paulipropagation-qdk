@@ -1,0 +1,110 @@
+{
+  "version": "26.11.0",
+  "gpu": "NVIDIA H100 NVL, 95830 MiB",
+  "threads_of_this_package": 40,
+  "cases": {
+    "readme_tfi_32": {
+      "gates": 2048,
+      "terms": 1671,
+      "most_terms": 1671,
+      "overlap_with_zero": 0.15459672824142456,
+      "norm": 0.9974120407445618,
+      "this_package": {
+        "terms": 1671,
+        "overlap_with_zero": 0.15459672824142456,
+        "norm": 0.9974120407445615
+      },
+      "difference": {
+        "only_this_package": 0,
+        "only_cupauliprop": 0,
+        "largest_unmatched_coeff": 0.0,
+        "largest_coeff_difference": 0.0
+      },
+      "capacity": 3342,
+      "seconds": {
+        "buffers per gate": 0.44693296800005555,
+        "two buffers": 0.34409382000012556
+      }
+    },
+    "kicked_ising_eagle_127": {
+      "gates": 5420,
+      "terms": 6149,
+      "most_terms": 14619,
+      "overlap_with_zero": 0.9169548592826353,
+      "norm": 0.9865469662494262,
+      "this_package": {
+        "terms": 6149,
+        "overlap_with_zero": 0.9169548592826355,
+        "norm": 0.9865469662494263
+      },
+      "difference": {
+        "only_this_package": 0,
+        "only_cupauliprop": 0,
+        "largest_unmatched_coeff": 0.0,
+        "largest_coeff_difference": 0.0
+      },
+      "capacity": 29238,
+      "seconds": {
+        "buffers per gate": 1.2243563510000968,
+        "two buffers": 0.9506057680000595
+      }
+    },
+    "tilted_ising_6x6": {
+      "gates": 1848,
+      "terms": 1036142,
+      "most_terms": 1036142,
+      "overlap_with_zero": 0.6696851623009776,
+      "norm": 0.9999989864784324,
+      "this_package": {
+        "terms": 1036142,
+        "overlap_with_zero": 0.6696851623009762,
+        "norm": 0.9999989864784327
+      },
+      "difference": {
+        "only_this_package": 0,
+        "only_cupauliprop": 0,
+        "largest_unmatched_coeff": 0.0,
+        "largest_coeff_difference": 0.0
+      },
+      "capacity": 2072284,
+      "seconds": {
+        "buffers per gate": 0.5997416379996139,
+        "two buffers": 0.5027699390002454
+      }
+    },
+    "noisy_ising_6x6": {
+      "gates": 1584,
+      "terms": 36935368,
+      "most_terms": 36935368,
+      "overlap_with_zero": 0.2877040894535267,
+      "norm": 0.7187545353137619,
+      "this_package": {
+        "terms": 36935368,
+        "overlap_with_zero": 0.28770408945354403,
+        "norm": 0.7187545353138027
+      },
+      "capacity": 73870736,
+      "seconds": {
+        "buffers per gate": 1.708130816999983,
+        "two buffers": 1.638259201999972
+      }
+    },
+    "noisy_ising_6x6_large": {
+      "gates": 1584,
+      "terms": 131664350,
+      "most_terms": 131664350,
+      "overlap_with_zero": 0.2895063499842397,
+      "norm": 0.7187914626129527,
+      "this_package": {
+        "terms": 131664350,
+        "overlap_with_zero": 0.28950634998425534,
+        "norm": 0.7187914626129946
+      },
+      "capacity": 263328700,
+      "seconds": {
+        "buffers per gate": 4.69742210000004,
+        "two buffers": 4.6041386949996195
+      }
+    }
+  }
+}

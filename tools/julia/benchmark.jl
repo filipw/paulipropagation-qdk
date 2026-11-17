@@ -1,10 +1,13 @@
 # Times PauliPropagation.jl on the benchmark circuits and writes them out for benchmarks/run.py.
 #
-#   julia -t 8 --project=tools/julia tools/julia/benchmark.jl [case ...]
+#   julia -t 8 --project=tools/julia tools/julia/benchmark.jl [--write-cases] [case ...]
 #
 # Every case is written to benchmarks/cases/<name>.json with the circuit, the observable and the
 # truncation. The timings, the number of terms and the overlap with the zero state go to
 # benchmarks/results/julia.json. Qubits are 0-based in the files.
+#
+# Without names, every case is run but the large ones, which need tens of gigabytes. With
+# --write-cases the files of the cases are written and nothing is timed.
 
 using PauliPropagation
 using PauliPropagation.Performance
@@ -15,6 +18,7 @@ include("circuitjson.jl")
 
 const ROOT = joinpath(@__DIR__, "..", "..", "benchmarks")
 const REPETITIONS = 3
+const WRITE_ONLY = Ref(false)
 
 function besttime(f::F) where {F}
     best = Inf
@@ -48,9 +52,11 @@ end
 
 """
 Times every configuration on `nlayers` repetitions of `layer` and writes the case.
-`observable` is `(symbols, qubits)` with 1-based qubits.
+`observable` is `(symbols, qubits)` with 1-based qubits. The configurations named in `skip`
+are not timed.
 """
-function benchmark(name, nq, layer, layer_params, nlayers, observable; max_weight=nothing, min_abs_coeff)
+function benchmark(name, nq, layer, layer_params, nlayers, observable; max_weight=nothing, min_abs_coeff,
+    skip=String[])
     circuit = repeat(layer, nlayers)
     params = repeat(layer_params, nlayers)
     symbols, qinds = observable
@@ -67,6 +73,7 @@ function benchmark(name, nq, layer, layer_params, nlayers, observable; max_weigh
     )
     mkpath(joinpath(ROOT, "cases"))
     open(io -> JSON.print(io, case), joinpath(ROOT, "cases", name * ".json"), "w")
+    WRITE_ONLY[] && return nothing
 
     reference = propagate(circuit, PauliSum(pstr), params; kw...)
     nterms = length(reference)
@@ -76,6 +83,7 @@ function benchmark(name, nq, layer, layer_params, nlayers, observable; max_weigh
     times = Dict{String,Float64}()
     results = Dict{String,Any}()
     for (label, run) in configurations(pstr, nterms + nterms ÷ 4)
+        label in skip && continue
         # one layer first, so that no timed run compiles anything
         run(layer, layer_params; kw...)
         result = nothing
@@ -128,7 +136,7 @@ CASES["readme_tfi_32"] = function ()
 end
 
 # A square-lattice Ising model with depolarizing noise on every qubit after every layer.
-CASES["noisy_ising_6x6"] = function ()
+function noisyising(name; min_abs_coeff, skip=String[])
     nx, ny = 6, 6
     nq = nx * ny
     topology = rectangletopology(nx, ny)
@@ -137,11 +145,26 @@ CASES["noisy_ising_6x6"] = function ()
     rxlayer!(layer, nq)
     append!(layer, (DepolarizingNoise(q) for q in 1:nq))
     params = vcat(fill(0.1, length(topology)), fill(0.2, nq), fill(0.01, nq))
-    return benchmark("noisy_ising_6x6", nq, layer, params, 12, ([:Z, :Z], [21, 22]); min_abs_coeff=1e-6)
+    return benchmark(name, nq, layer, params, 12, ([:Z, :Z], [21, 22]); min_abs_coeff, skip)
 end
 
+CASES["noisy_ising_6x6"] = () -> noisyising("noisy_ising_6x6"; min_abs_coeff=1e-6)
+
+# The same circuit with a lower threshold, which leaves 131,664,350 terms. The dictionary is
+# run once for the reference and not timed.
+CASES["noisy_ising_6x6_large"] = () ->
+    noisyising("noisy_ising_6x6_large"; min_abs_coeff=3e-7, skip=["dict"])
+
+const LARGE = ["noisy_ising_6x6_large"]
+
 function main()
-    names = isempty(ARGS) ? sort(collect(keys(CASES))) : ARGS
+    arguments = filter(!=("--write-cases"), ARGS)
+    WRITE_ONLY[] = length(arguments) < length(ARGS)
+    names = isempty(arguments) ? sort(setdiff(collect(keys(CASES)), LARGE)) : arguments
+    if WRITE_ONLY[]
+        foreach(name -> CASES[name](), names)
+        return
+    end
     path = joinpath(ROOT, "results", "julia.json")
     report = isfile(path) ? JSON.parsefile(path) : Dict{String,Any}()
     report["version"] = string(pkgversion(PauliPropagation))

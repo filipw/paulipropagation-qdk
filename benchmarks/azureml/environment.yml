@@ -1,0 +1,10 @@
+name: paulipropagation-qdk-benchmarks
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - paulipropagation-qdk==0.1.0
+      - cuquantum-python-cu12==26.11.0
+      - cupy-cuda12x[ctk]==14.2.0

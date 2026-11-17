@@ -1,0 +1,55 @@
+{
+  "versions": {
+    "paulipropagation-qdk": "0.1.0",
+    "pauli-prop": "0.2.1"
+  },
+  "processor": "Apple M4 Pro",
+  "cores": 12,
+  "thresholds": {
+    "0.0001": {
+      "pauli-prop": {
+        "terms": 44037,
+        "expectation": -0.026192411232881706,
+        "seconds": 0.26427774998592213
+      },
+      "paulipropagation-qdk": {
+        "seconds": {
+          "1": 0.02311749994987622,
+          "8": 0.009278082987293601
+        },
+        "terms": 39398,
+        "expectation": -0.02674412865202275
+      }
+    },
+    "1e-05": {
+      "pauli-prop": {
+        "terms": 138626,
+        "expectation": -0.02609725587602305,
+        "seconds": 0.7530705840326846
+      },
+      "paulipropagation-qdk": {
+        "seconds": {
+          "1": 0.06898904195986688,
+          "8": 0.018322083982639015
+        },
+        "terms": 128403,
+        "expectation": -0.02604479316268838
+      }
+    },
+    "1e-06": {
+      "pauli-prop": {
+        "terms": 353187,
+        "expectation": -0.02605079447998727,
+        "seconds": 1.8077907499973662
+      },
+      "paulipropagation-qdk": {
+        "seconds": {
+          "1": 0.17429308302234858,
+          "8": 0.0362009170348756
+        },
+        "terms": 333977,
+        "expectation": -0.026053791938594067
+      }
+    }
+  }
+}

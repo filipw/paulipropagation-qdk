@@ -1,0 +1,221 @@
+{
+  "version": "0.9.2",
+  "cases": {
+    "noisy_ising_6x6": {
+      "seconds": {
+        "vector, 1 thread": 29.136893904,
+        "fused, 1 thread": 29.170666466,
+        "fused": 5.390894124,
+        "dict": 205.522820854,
+        "vector": 5.392706035,
+        "fused, zones": 3.543298728,
+        "fused, zones, sized": 3.458265423
+      },
+      "results": {
+        "vector, 1 thread": {
+          "overlap_with_zero": 0.2877040894535435,
+          "terms": 36935368
+        },
+        "fused, 1 thread": {
+          "overlap_with_zero": 0.2877040894535435,
+          "terms": 36935368
+        },
+        "fused": {
+          "overlap_with_zero": 0.2877040894535435,
+          "terms": 36935368
+        },
+        "dict": {
+          "overlap_with_zero": 0.2877040894535433,
+          "terms": 36935368
+        },
+        "vector": {
+          "overlap_with_zero": 0.2877040894535435,
+          "terms": 36935368
+        },
+        "fused, zones": {
+          "overlap_with_zero": 0.2877040894535437,
+          "terms": 36935368
+        },
+        "fused, zones, sized": {
+          "overlap_with_zero": 0.2877040894535437,
+          "terms": 36935368
+        }
+      },
+      "overlap_with_zero": 0.2877040894535433,
+      "gates": 1584,
+      "terms": 36935368
+    },
+    "noisy_ising_6x6_large": {
+      "seconds": {
+        "vector, 1 thread": 97.394465102,
+        "fused, 1 thread": 97.472904259,
+        "fused": 17.963539237,
+        "vector": 18.002209756,
+        "fused, zones": 12.503349997,
+        "fused, zones, sized": 12.515796863
+      },
+      "results": {
+        "vector, 1 thread": {
+          "overlap_with_zero": 0.2895063499842565,
+          "terms": 131664350
+        },
+        "fused, 1 thread": {
+          "overlap_with_zero": 0.2895063499842565,
+          "terms": 131664350
+        },
+        "fused": {
+          "overlap_with_zero": 0.2895063499842565,
+          "terms": 131664350
+        },
+        "vector": {
+          "overlap_with_zero": 0.2895063499842565,
+          "terms": 131664350
+        },
+        "fused, zones": {
+          "overlap_with_zero": 0.2895063499842564,
+          "terms": 131664350
+        },
+        "fused, zones, sized": {
+          "overlap_with_zero": 0.2895063499842564,
+          "terms": 131664350
+        }
+      },
+      "overlap_with_zero": 0.28950634998425734,
+      "gates": 1584,
+      "terms": 131664350
+    },
+    "kicked_ising_eagle_127": {
+      "seconds": {
+        "vector, 1 thread": 0.074671152,
+        "fused, 1 thread": 0.072981933,
+        "fused": 0.073911025,
+        "dict": 0.473242648,
+        "vector": 0.076139456,
+        "fused, zones": 0.233949425,
+        "fused, zones, sized": 0.235455036
+      },
+      "results": {
+        "vector, 1 thread": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "fused, 1 thread": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "fused": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "dict": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "vector": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "fused, zones": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        },
+        "fused, zones, sized": {
+          "overlap_with_zero": 0.9169548592826354,
+          "terms": 6149
+        }
+      },
+      "overlap_with_zero": 0.9169548592826354,
+      "gates": 5420,
+      "terms": 6149
+    },
+    "readme_tfi_32": {
+      "seconds": {
+        "vector, 1 thread": 0.002746491,
+        "fused, 1 thread": 0.002676181,
+        "fused": 0.003006532,
+        "dict": 0.011266846,
+        "vector": 0.003134162,
+        "fused, zones": 0.099467071,
+        "fused, zones, sized": 0.09719871
+      },
+      "results": {
+        "vector, 1 thread": {
+          "overlap_with_zero": 0.15459672824142456,
+          "terms": 1671
+        },
+        "fused, 1 thread": {
+          "overlap_with_zero": 0.15459672824142456,
+          "terms": 1671
+        },
+        "fused": {
+          "overlap_with_zero": 0.15459672824142456,
+          "terms": 1671
+        },
+        "dict": {
+          "overlap_with_zero": 0.15459672824142454,
+          "terms": 1671
+        },
+        "vector": {
+          "overlap_with_zero": 0.15459672824142456,
+          "terms": 1671
+        },
+        "fused, zones": {
+          "overlap_with_zero": 0.15459672824142454,
+          "terms": 1671
+        },
+        "fused, zones, sized": {
+          "overlap_with_zero": 0.15459672824142454,
+          "terms": 1671
+        }
+      },
+      "overlap_with_zero": 0.15459672824142454,
+      "gates": 2048,
+      "terms": 1671
+    },
+    "tilted_ising_6x6": {
+      "seconds": {
+        "vector, 1 thread": 1.086041608,
+        "fused, 1 thread": 1.071195951,
+        "fused": 0.400716479,
+        "dict": 6.928051637,
+        "vector": 0.430248339,
+        "fused, zones": 0.214609602,
+        "fused, zones, sized": 0.167136123
+      },
+      "results": {
+        "vector, 1 thread": {
+          "overlap_with_zero": 0.6696851623009775,
+          "terms": 1036142
+        },
+        "fused, 1 thread": {
+          "overlap_with_zero": 0.6696851623009775,
+          "terms": 1036142
+        },
+        "fused": {
+          "overlap_with_zero": 0.6696851623009775,
+          "terms": 1036142
+        },
+        "dict": {
+          "overlap_with_zero": 0.6696851623009783,
+          "terms": 1036142
+        },
+        "vector": {
+          "overlap_with_zero": 0.6696851623009775,
+          "terms": 1036142
+        },
+        "fused, zones": {
+          "overlap_with_zero": 0.6696851623009772,
+          "terms": 1036142
+        },
+        "fused, zones, sized": {
+          "overlap_with_zero": 0.6696851623009772,
+          "terms": 1036142
+        }
+      },
+      "overlap_with_zero": 0.6696851623009783,
+      "gates": 1848,
+      "terms": 1036142
+    }
+  },
+  "threads": 40
+}
