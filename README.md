@@ -25,7 +25,8 @@ flowchart LR
 
 ## Install
 
-Python 3.10 or later; wheels for Linux and Windows (x86-64, arm64) and macOS (arm64):
+Python 3.10 or later; wheels for Linux and Windows (x86-64, arm64) and macOS (arm64). On x86-64
+the processor has to support x86-64-v2 (SSE4.2 and POPCNT: Intel from 2009, AMD from 2011):
 
 ```bash
 pip install paulipropagation-qdk

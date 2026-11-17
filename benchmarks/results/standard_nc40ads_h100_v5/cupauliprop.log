@@ -1,0 +1,28 @@
+readme_tfi_32: 32 qubits, 2048 gates
+  this package                        1671 terms   overlap 0.15459672824142456
+  cuPauliProp                         1671 terms   overlap 0.15459672824142456
+  {'only_this_package': 0, 'only_cupauliprop': 0, 'largest_unmatched_coeff': 0.0, 'largest_coeff_difference': 0.0}
+  cuPauliProp, buffers per gate   0.4469 s
+  cuPauliProp, two buffers       0.3441 s
+kicked_ising_eagle_127: 127 qubits, 5420 gates
+  this package                        6149 terms   overlap 0.9169548592826355
+  cuPauliProp                         6149 terms   overlap 0.9169548592826353
+  {'only_this_package': 0, 'only_cupauliprop': 0, 'largest_unmatched_coeff': 0.0, 'largest_coeff_difference': 0.0}
+  cuPauliProp, buffers per gate   1.2244 s
+  cuPauliProp, two buffers       0.9506 s
+tilted_ising_6x6: 36 qubits, 1848 gates
+  this package                     1036142 terms   overlap 0.6696851623009762
+  cuPauliProp                      1036142 terms   overlap 0.6696851623009776
+  {'only_this_package': 0, 'only_cupauliprop': 0, 'largest_unmatched_coeff': 0.0, 'largest_coeff_difference': 0.0}
+  cuPauliProp, buffers per gate   0.5997 s
+  cuPauliProp, two buffers       0.5028 s
+noisy_ising_6x6: 36 qubits, 1584 gates
+  this package                    36935368 terms   overlap 0.28770408945354403
+  cuPauliProp                     36935368 terms   overlap 0.2877040894535267
+  cuPauliProp, buffers per gate   1.7081 s
+  cuPauliProp, two buffers       1.6383 s
+noisy_ising_6x6_large: 36 qubits, 1584 gates
+  this package                   131664350 terms   overlap 0.28950634998425534
+  cuPauliProp                    131664350 terms   overlap 0.2895063499842397
+  cuPauliProp, buffers per gate   4.6974 s
+  cuPauliProp, two buffers       4.6041 s

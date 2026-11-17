@@ -79,6 +79,8 @@ measured numbers are in [`benchmarks/results`](../benchmarks/results).
 | Laptop | Apple M4 Pro, eight performance cores | |
 | Azure `Standard_NC40ads_H100_v5` | AMD EPYC 9V84, 40 cores | NVIDIA H100 NVL, 94 GB |
 
+On x86-64 the package is built for x86-64-v2.
+
 ### PauliPropagation.jl
 
 Truncation by coefficient, in the first two cases also by weight; both packages give the same number of terms and the
@@ -102,14 +104,16 @@ AMD EPYC 9V84, where the last case is the one before it with a lower threshold:
 
 | Case | Terms | paulipropagation-qdk, 1 thread | Julia, 1 thread | paulipropagation-qdk, 40 threads | Julia, 40 threads |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 3.8 ms | 2.7 ms | 3.8 ms | 3.0 ms |
-| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 0.11 s | 73 ms | 70 ms | 74 ms |
-| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 1.5 s | 1.1 s | 0.23 s | 0.17 s |
-| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 40.2 s | 29.1 s | 4.0 s | 3.5 s |
-| The same, with a lower threshold | 131,664,350 | 135 s | 97.4 s | 13.8 s | 12.5 s |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 2.8 ms | 2.7 ms | 2.8 ms | 3.0 ms |
+| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 79 ms | 73 ms | 61 ms | 74 ms |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 1.27 s | 1.07 s | 0.21 s | 0.17 s |
+| The same lattice with depolarizing noise, 12 layers | 36,935,368 | 34.7 s | 29.1 s | 4.0 s | 3.5 s |
+| The same, with a lower threshold | 131,664,350 | 116 s | 97.4 s | 13.7 s | 12.5 s |
 
-- On the M4 Pro the two packages are level. On the EPYC processor PauliPropagation.jl is 1.4 to
-  1.5 times faster on one thread, and on 40 threads between level and 1.35 times faster.
+- On the M4 Pro the two packages are level.
+- On the EPYC processor PauliPropagation.jl is 1.04 to 1.2 times faster on one thread. On 40
+  threads paulipropagation-qdk is 1.1 to 1.2 times faster in the two small cases, and
+  PauliPropagation.jl 1.1 to 1.3 times faster from a million terms.
 
 ### pauli-prop
 
@@ -143,11 +147,11 @@ python benchmarks/cupauliprop.py
 
 | Case | Terms | paulipropagation-qdk, 40 threads | Julia, 40 threads | cuPauliProp |
 | --- | ---: | ---: | ---: | ---: |
-| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 3.8 ms | 3.0 ms | 0.34 s |
-| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 70 ms | 74 ms | 0.95 s |
-| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.23 s | 0.17 s | 0.50 s |
+| Transverse-field Ising chain, 32 qubits, 32 layers | 1,671 | 2.8 ms | 3.0 ms | 0.34 s |
+| Kicked Ising on the 127-qubit heavy-hex lattice, 20 layers | 6,149 | 61 ms | 74 ms | 0.95 s |
+| Tilted-field Ising on 6 x 6 qubits, 14 layers | 1,036,142 | 0.21 s | 0.17 s | 0.50 s |
 | The same lattice with depolarizing noise, 12 layers | 36,935,368 | 4.0 s | 3.5 s | 1.6 s |
-| The same, with a lower threshold | 131,664,350 | 13.8 s | 12.5 s | 4.6 s |
+| The same, with a lower threshold | 131,664,350 | 13.7 s | 12.5 s | 4.6 s |
 
 - Up to a million terms the GPU is slower: a gate costs it at least 0.17 ms, however small the
   sum.

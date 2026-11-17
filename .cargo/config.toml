@@ -1,0 +1,5 @@
+# x86-64 builds are for x86-64-v2 (SSE4.2 and POPCNT; Intel from 2009, AMD from 2011): the engine
+# counts the bits of Pauli strings in its inner loops, and the baseline instruction set has no
+# instruction for that.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v2"]

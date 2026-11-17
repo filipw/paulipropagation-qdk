@@ -1,0 +1,54 @@
+readme_tfi_32: 32 qubits, 2048 gates, 1671 terms
+  this package, 1 thread         0.0028 s   overlap 0.15459672824142456
+  this package, 8 threads        0.0028 s   overlap 0.15459672824142456
+  this package, 40 threads       0.0028 s   overlap 0.15459672824142456
+  julia: fused, zones            0.0995 s    35.99 x
+  julia: fused, zones, sized     0.0972 s    35.17 x
+  julia: dict                    0.0113 s     4.08 x
+  julia: vector                  0.0031 s     1.13 x
+  julia: fused                   0.0030 s     1.09 x
+  julia: vector, 1 thread        0.0027 s     0.98 x
+  julia: fused, 1 thread         0.0027 s     0.96 x
+kicked_ising_eagle_127: 127 qubits, 5420 gates, 6149 terms
+  this package, 1 thread         0.0793 s   overlap 0.9169548592826355
+  this package, 8 threads        0.0599 s   overlap 0.9169548592826355
+  this package, 40 threads       0.0609 s   overlap 0.9169548592826355
+  julia: dict                    0.4732 s     7.77 x
+  julia: fused, zones, sized     0.2355 s     3.87 x
+  julia: fused, zones            0.2339 s     3.84 x
+  julia: vector                  0.0761 s     1.25 x
+  julia: vector, 1 thread        0.0747 s     0.94 x
+  julia: fused                   0.0739 s     1.21 x
+  julia: fused, 1 thread         0.0730 s     0.92 x
+tilted_ising_6x6: 36 qubits, 1848 gates, 1036142 terms
+  this package, 1 thread         1.2739 s   overlap 0.6696851623009762
+  this package, 8 threads        0.6350 s   overlap 0.6696851623009762
+  this package, 40 threads       0.2148 s   overlap 0.6696851623009762
+  julia: dict                    6.9281 s    32.25 x
+  julia: vector, 1 thread        1.0860 s     0.85 x
+  julia: fused, 1 thread         1.0712 s     0.84 x
+  julia: vector                  0.4302 s     2.00 x
+  julia: fused                   0.4007 s     1.87 x
+  julia: fused, zones            0.2146 s     1.00 x
+  julia: fused, zones, sized     0.1671 s     0.78 x
+noisy_ising_6x6: 36 qubits, 1584 gates, 36935368 terms
+  this package, 1 thread        34.7177 s   overlap 0.28770408945354403
+  this package, 8 threads        7.3986 s   overlap 0.28770408945354403
+  this package, 40 threads       3.9563 s   overlap 0.28770408945354403
+  julia: dict                  205.5228 s    51.95 x
+  julia: fused, 1 thread        29.1707 s     0.84 x
+  julia: vector, 1 thread       29.1369 s     0.84 x
+  julia: vector                  5.3927 s     1.36 x
+  julia: fused                   5.3909 s     1.36 x
+  julia: fused, zones            3.5433 s     0.90 x
+  julia: fused, zones, sized     3.4583 s     0.87 x
+noisy_ising_6x6_large: 36 qubits, 1584 gates, 131664350 terms
+  this package, 1 thread       116.4447 s   overlap 0.28950634998425534
+  this package, 8 threads       21.5854 s   overlap 0.28950634998425534
+  this package, 40 threads      13.6833 s   overlap 0.28950634998425534
+  julia: fused, 1 thread        97.4729 s     0.84 x
+  julia: vector, 1 thread       97.3945 s     0.84 x
+  julia: vector                 18.0022 s     1.32 x
+  julia: fused                  17.9635 s     1.31 x
+  julia: fused, zones, sized    12.5158 s     0.91 x
+  julia: fused, zones           12.5033 s     0.91 x

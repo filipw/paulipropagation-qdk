@@ -221,4 +221,7 @@ __marimo__/
 
 # Julia
 Manifest.toml
+
+# What the benchmarks printed is kept with their results.
+!benchmarks/results/**/*.log
 .DS_Store

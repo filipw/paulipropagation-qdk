@@ -19,6 +19,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - crates/*/Cargo.toml
+      - .cargo/config.toml
       - .github/workflows/publish.yml
 
 permissions:
@@ -61,6 +62,13 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --locked --out dist
           manylinux: auto
+      # The x86-64 builds are for x86-64-v2 (.cargo/config.toml), which shows in the wheel as
+      # POPCNT instructions. A RUSTFLAGS variable would replace the flags of that file.
+      - name: Check the instruction set
+        if: matrix.platform == 'linux' && matrix.target == 'x86_64'
+        run: |
+          unzip -q dist/*.whl -d unpacked
+          test "$(objdump -d unpacked/paulipropagation_qdk/_native*.so | grep -c popcnt)" -gt 0
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.platform }}-${{ matrix.target }}

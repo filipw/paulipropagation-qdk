@@ -1,6 +1,6 @@
 {
   "versions": {
-    "paulipropagation-qdk": "0.1.0",
+    "paulipropagation-qdk": "0.1.1",
     "pauli-prop": "0.2.1"
   },
   "processor": "Apple M4 Pro",

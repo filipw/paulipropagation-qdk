@@ -35,6 +35,8 @@ manifest-path = "crates/py/Cargo.toml"
 python-source = "python"
 module-name = "paulipropagation_qdk._native"
 features = ["pyo3/extension-module"]
+# The instruction set of the x86-64 builds, so that a build from the sdist is like the wheels.
+include = [{ path = ".cargo/config.toml", format = "sdist" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
